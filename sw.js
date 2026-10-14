@@ -1,7 +1,7 @@
 // Offline support: cache the app files, serve them when there is no connection.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './sync.js', './google.js', './config.js', './manifest.webmanifest',
-  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
+  './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
