@@ -1,6 +1,6 @@
 // Offline support: cache the app files, serve them when there is no connection.
-const VERSION = 'v6';
-const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './sync.js', './push.js', './i18n.js', './config.js', './manifest.webmanifest',
+const VERSION = 'v9';
+const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './sync.js', './push.js', './i18n.js', './pdf.js', './attach.js', './config.js', './manifest.webmanifest',
   './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -19,7 +19,7 @@ self.addEventListener('fetch', e => {
     return;
   }
   // Supabase library: pinned version, cache it so the app opens offline
-  if (url.hostname === 'cdn.jsdelivr.net') {
+  if (url.hostname === 'cdn.jsdelivr.net' || url.hostname === 'cdnjs.cloudflare.com') {
     e.respondWith(caches.open(VERSION).then(async c => (await c.match(req)) || fetch(req).then(r => { c.put(req, r.clone()); return r; })));
     return;
   }

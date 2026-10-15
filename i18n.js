@@ -4,7 +4,7 @@
 const DE = {
   // navigation + general
   'Today': 'Heute', 'Habits': 'Gewohnheiten', 'Tasks': 'Aufgaben', 'Training': 'Training', 'Settings': 'Einstellungen',
-  'Habit & Life': 'Habit & Life', 'Tracker': 'Tracker',
+  'Habit & Life': 'Habit & Life', 'Tracker': 'Tracker', 'Habit & Life Tracker': 'Habit & Life Tracker',
   'Add': 'Hinzufügen', 'Cancel': 'Abbrechen', 'Save': 'Speichern', 'Delete': 'Löschen', 'Done': 'Erledigt', 'Open': 'Öffnen',
   'Name': 'Name', 'Later': 'Später', 'Close': 'Fertig', 'Something went wrong. Try again.': 'Etwas ist schiefgelaufen. Versuch es nochmal.',
   'today': 'heute', 'of': 'von', 'just now': 'gerade eben', '{n} min ago': 'vor {n} Min.', '{n} h ago': 'vor {n} Std.',
@@ -146,6 +146,42 @@ const DE = {
   'Bicep curl': 'Bizepscurls', 'Squat': 'Kniebeugen', 'Deadlift': 'Kreuzheben', 'Leg press': 'Beinpresse', 'Lunges': 'Ausfallschritte',
   'Shoulder press': 'Schulterdrücken', 'Lateral raise': 'Seitheben', 'Plank': 'Unterarmstütz',
   'Treadmill': 'Laufband', 'Jogging': 'Joggen', 'Cycling': 'Radfahren', 'Rowing': 'Rudern', 'Swimming': 'Schwimmen', 'Jump rope': 'Seilspringen',
+  // weekly plan
+  'From your plan': 'Aus deinem Plan', 'Use plan for this day': 'Plan für diesen Tag verwenden', 'Weekly plan': 'Wochenplan',
+  'Set up weekly plan': 'Wochenplan anlegen', 'Or copy last week': 'Oder letzte Woche kopieren', 'Rest day': 'Ruhetag',
+  'Tip: set up a weekly plan once, and every week fills itself in automatically.': 'Tipp: Leg einmal einen Wochenplan an, dann füllt sich jede Woche automatisch.',
+  'Rest day, or muscle groups, e.g. Chest': 'Ruhetag oder Muskelgruppen, z. B. Brust', 'Back to training': 'Zurück zum Training',
+  'Your standard week. Every week fills itself in from this plan. If you change something on a specific day, only that day changes.':
+    'Deine Standardwoche. Jede Woche füllt sich automatisch aus diesem Plan. Änderst du etwas an einem bestimmten Tag, ändert sich nur dieser Tag.',
+  'Use this week as my plan': 'Diese Woche als Plan übernehmen', 'Delete plan': 'Plan löschen', 'Day reset to your plan': 'Tag auf deinen Plan zurückgesetzt',
+  'Replace your weekly plan with the week of {date}?': 'Deinen Wochenplan durch die Woche vom {date} ersetzen?', 'Weekly plan saved': 'Wochenplan gespeichert',
+  'Delete your weekly plan? Days you already changed stay as they are.': 'Deinen Wochenplan löschen? Tage, die du schon geändert hast, bleiben, wie sie sind.',
+  'Weekly plan deleted': 'Wochenplan gelöscht',
+
+  // year overview
+  'Year overview': 'Jahresübersicht', 'Year in review': 'Jahresrückblick', 'Your year {y}': 'Dein Jahr {y}', 'Your year {y} is ready': 'Dein Jahr {y} ist fertig',
+  'Previous year': 'Vorheriges Jahr', 'Next year': 'Nächstes Jahr', 'habits completed': 'Gewohnheiten erledigt', 'workouts': 'Trainings',
+  'Most consistent': 'Am beständigsten', 'Best month': 'Bester Monat', 'Longest streak': 'Längste Serie',
+  'Every day of the year': 'Jeder Tag des Jahres', 'none': 'keine', 'all habits': 'alle Gewohnheiten', 'Habits this year': 'Gewohnheiten in diesem Jahr',
+  '{n} check-ins · best streak {b} days': '{n}× abgehakt · beste Serie {b} Tage', 'No habit data for this year yet.': 'Für dieses Jahr gibt es noch keine Gewohnheits-Daten.',
+  'Training and tasks': 'Training und Aufgaben', 'Workouts per month': 'Trainings pro Monat', 'Workouts': 'Trainings',
+  'Tasks completed': 'Erledigte Aufgaben', 'Goals reached': 'Erreichte Ziele',
+  // calendar weeks, monthly review, reviews, PDF
+  'CW {n}': 'KW {n}', 'Month review': 'Monatsrückblick', 'Monthly review': 'Monatsrückblick', 'Best week': 'Beste Woche', 'Weeks': 'Wochen',
+  'Every day of the month': 'Jeder Tag des Monats', 'Habits this month': 'Gewohnheiten in diesem Monat', 'No habit data for this month yet.': 'Für diesen Monat gibt es noch keine Gewohnheits-Daten.',
+  'Exercises done': 'Erledigte Übungen', 'Goals': 'Ziele', 'Save as PDF': 'Als PDF speichern', 'Creating…': 'Wird erstellt…',
+  'PDF saved to your downloads': 'PDF in deinen Downloads gespeichert', 'Reviews': 'Rückblicke', 'Look back at any month or year, or save it as a PDF.': 'Schau auf jeden Monat oder jedes Jahr zurück oder speichere ihn als PDF.',
+  'Year review {y}': 'Jahresrückblick {y}', 'Your {month} review is ready': 'Dein Rückblick auf {month} ist fertig', 'Review': 'Rueckblick',
+  'Every day': 'Jeder Tag', 'created {date}': 'erstellt am {date}',
+  'Could not load the PDF tool. Check your internet connection and try again.': 'Das PDF-Werkzeug konnte nicht geladen werden. Prüf deine Internetverbindung und versuch es nochmal.',
+  // links & documents
+  'Links & documents': 'Links & Dokumente', 'Nothing attached yet.': 'Noch nichts angehängt.', 'Paste a link…': 'Link einfügen…', 'Link': 'Link',
+  'Title (optional)': 'Titel (optional)', 'Add link': 'Link hinzufügen', 'Add document': 'Dokument hinzufügen', 'Remove': 'Entfernen',
+  'Up to 20 MB per file. Adding and opening documents needs internet.': 'Bis zu 20 MB pro Datei. Zum Hinzufügen und Öffnen von Dokumenten brauchst du Internet.',
+  'Sign in to sync to attach documents. Links work without an account.': 'Melde dich an, um Dokumente anzuhängen. Links funktionieren auch ohne Konto.',
+  'Uploading {name}…': '{name} wird hochgeladen…', 'Document added': 'Dokument hinzugefügt', "That doesn't look like a web address.": 'Das sieht nicht wie eine Internetadresse aus.',
+  'Sign in to sync first to attach documents.': 'Melde dich zuerst an, um Dokumente anzuhängen.', 'Uploading documents needs an internet connection.': 'Zum Hochladen von Dokumenten brauchst du Internet.',
+  'This file is larger than 20 MB.': 'Diese Datei ist größer als 20 MB.', 'Opening documents needs an internet connection.': 'Zum Öffnen von Dokumenten brauchst du Internet.',
 };
 
 let lang = 'en';
