@@ -26,7 +26,7 @@ const EXERCISES = ['Barbell bench press', 'Incline bench press', 'Push-ups', 'Di
   'Pull-ups', 'Seated row', 'Lat pulldown', 'Bicep curl', 'Squat', 'Deadlift', 'Leg press',
   'Lunges', 'Shoulder press', 'Lateral raise', 'Plank'];
 const CARDIO = ['Treadmill', 'Jogging', 'Cycling', 'Rowing', 'Swimming', 'Jump rope'];
-const VIEWS = ['today', 'habits', 'tasks', 'train', 'more', 'plan', 'year', 'month'];
+const VIEWS = ['today', 'habits', 'tasks', 'train', 'more', 'plan', 'year', 'month', 'progress'];
 
 /* ---------- helpers ---------- */
 const $ = (s, el = document) => el.querySelector(s);
@@ -76,44 +76,198 @@ async function remove(id) {
 }
 
 /* ---------- habit logic ---------- */
+// A habit can run every day, on chosen weekdays (days: 0 = Monday … 6 = Sunday) or X times per week.
+// A check-in is "full" or "mini" (the short version for busy days, worth half in percentages).
+// Free day: for streaks, one missed scheduled day per calendar week is forgiven automatically.
 const habits = () => list('habit').sort((a, b) => (a.data.order ?? 0) - (b.data.order ?? 0));
 const logId = (h, d) => `log_${h}_${d}`;
-const isDone = (h, d) => !!get(logId(h, d))?.data.done;
+const logOf = (hid, d) => get(logId(hid, d))?.data;
+const isDone = (hid, d) => !!logOf(hid, d)?.done;
+const isMini = (hid, d) => logOf(hid, d)?.level === 'mini';
+const valueOn = (hid, d) => (isDone(hid, d) ? (isMini(hid, d) ? 0.5 : 1) : 0);
 const activeOn = (h, d) => !h.data.start || h.data.start <= d;
+const freqOf = h => h.data.freq || 'daily';
+const isWeekly = h => freqOf(h) === 'weekly';
+const dayIdx = d => (parse(d).getDay() + 6) % 7;
+function scheduledOn(h, d) { // counts for daily stats on this day?
+  if (!activeOn(h, d) || isWeekly(h)) return false;
+  return freqOf(h) === 'days' ? (h.data.days || []).includes(dayIdx(d)) : true;
+}
+const showToday = (h, d) => activeOn(h, d) && (isWeekly(h) || scheduledOn(h, d));
+const targetText = h => h.data.target ? `${h.data.target} ${tr(h.data.unit || '')}`.trim() : '';
+const miniText = h => h.data.mini ? `${h.data.mini} ${tr(h.data.unit || '')}`.trim() : '';
+function weekProgress(h, d) { // weekly habits: days done in the calendar week of d
+  const mon = mondayOf(parse(d));
+  let n = 0;
+  for (let i = 0; i < 7; i++) if (isDone(h.id, ymd(addDays(mon, i)))) n++;
+  return { n, of: +h.data.perWeek || 3 };
+}
 
 function dayStats(d, hs = habits()) {
-  const el = hs.filter(h => activeOn(h, d));
-  const done = el.filter(h => isDone(h.id, d)).length;
-  return { done, total: el.length, pct: el.length ? done / el.length : 0 };
+  const el = hs.filter(h => scheduledOn(h, d));
+  let done = 0, checkins = 0;
+  el.forEach(h => { done += valueOn(h.id, d); if (isDone(h.id, d)) checkins++; });
+  return { done, checkins, total: el.length, all: el.length > 0 && checkins === el.length, pct: el.length ? done / el.length : 0 };
 }
-function streak(hid) {
-  let d = new Date();
-  if (!isDone(hid, ymd(d))) d = addDays(d, -1);
-  let n = 0;
-  while (isDone(hid, ymd(d)) && n < 5000) { n++; d = addDays(d, -1); }
-  return n;
+
+// Streak with one forgiven day per calendar week. Returns the length and which days were forgiven.
+function streakInfo(hid) {
+  const h = get(hid);
+  const covered = new Set();
+  if (!h) return { n: 0, covered };
+  const t = today();
+  if (isWeekly(h)) { // streak in weeks that reached the target
+    let mon = mondayOf(new Date()), n = 0;
+    if (weekProgress(h, ymd(mon)).n < (+h.data.perWeek || 3)) mon = addDays(mon, -7);
+    while (n < 520 && activeOn(h, ymd(addDays(mon, 6))) && weekProgress(h, ymd(mon)).n >= (+h.data.perWeek || 3)) { n++; mon = addDays(mon, -7); }
+    return { n, covered, weeks: true };
+  }
+  let d = parse(t), n = 0;
+  if (!isDone(hid, t)) d = addDays(d, -1); // today still open: count up to yesterday
+  const freeUsed = new Set();
+  for (let guard = 0; guard < 4000; guard++) {
+    const ds = ymd(d);
+    if (!activeOn(h, ds)) break;
+    if (scheduledOn(h, ds)) {
+      if (isDone(hid, ds)) n++;
+      else {
+        const wk = weekKey(ds);
+        if (freeUsed.has(wk)) break;
+        freeUsed.add(wk); covered.add(ds);
+      }
+    }
+    d = addDays(d, -1);
+  }
+  // a forgiven day at the very start of the chain isn't part of the streak
+  return { n, covered: n ? covered : new Set() };
 }
+const streak = hid => streakInfo(hid).n;
 function bestStreak(hid) {
-  const dates = list('habit_log').filter(r => r.data.habitId === hid && r.data.done).map(r => r.data.date).sort();
-  let best = 0, cur = 0, prev = null;
-  for (const ds of dates) {
-    cur = prev && ymd(addDays(parse(prev), 1)) === ds ? cur + 1 : 1;
-    best = Math.max(best, cur); prev = ds;
+  const h = get(hid);
+  if (!h) return 0;
+  const t = today();
+  const firstLog = list('habit_log').filter(r => r.data.habitId === hid && r.data.done).map(r => r.data.date).sort()[0];
+  if (!firstLog) return 0;
+  if (isWeekly(h)) {
+    let mon = mondayOf(parse(firstLog)), run = 0, best = 0;
+    while (ymd(mon) <= t) { if (weekProgress(h, ymd(mon)).n >= (+h.data.perWeek || 3)) best = Math.max(best, ++run); else if (ymd(addDays(mon, 6)) < t) run = 0; mon = addDays(mon, 7); }
+    return best;
+  }
+  let d = parse(firstLog), run = 0, best = 0;
+  const freeUsed = new Set();
+  while (ymd(d) <= t) {
+    const ds = ymd(d);
+    if (scheduledOn(h, ds)) {
+      if (isDone(hid, ds)) best = Math.max(best, ++run);
+      else if (ds < t) { const wk = weekKey(ds); if (freeUsed.has(wk)) run = 0; else freeUsed.add(wk); }
+    }
+    d = addDays(d, 1);
   }
   return best;
 }
+// One habit over a list of days: score (mini = half), scheduled days, check-ins, best run inside the period.
+function habitPeriod(h, days) {
+  const t = today(), past = days.filter(d => d <= t);
+  if (isWeekly(h)) {
+    const weeks = [...new Set(past.map(d => weekKey(d)))];
+    const mondays = [...new Set(past.map(d => ymd(mondayOf(parse(d)))))].filter(m => activeOn(h, ymd(addDays(parse(m), 6))));
+    const met = mondays.filter(m => weekProgress(h, m).n >= (+h.data.perWeek || 3)).length;
+    return { done: met, total: mondays.length, checkins: past.filter(d => isDone(h.id, d)).length, best: bestStreak(h.id), weeks: true, weeksTotal: weeks.length };
+  }
+  let done = 0, total = 0, checkins = 0, run = 0, best = 0;
+  past.forEach(d => {
+    if (!scheduledOn(h, d)) return;
+    total++; done += valueOn(h.id, d);
+    if (isDone(h.id, d)) { checkins++; best = Math.max(best, ++run); } else run = 0;
+  });
+  return { done, total, checkins, best };
+}
 function monthStats(y, m) {
   const n = daysInMonth(y, m), t = today(), hs = habits();
-  let done = 0, total = 0, perfect = 0;
+  let done = 0, total = 0, perfect = 0, checkins = 0;
   const days = [];
   for (let i = 1; i <= n; i++) {
     const d = `${y}-${pad(m + 1)}-${pad(i)}`;
     const s = dayStats(d, hs);
     const future = d > t;
     days.push({ d, ...s, future });
-    if (!future) { done += s.done; total += s.total; if (s.total && s.done === s.total) perfect++; }
+    if (!future) { done += s.done; total += s.total; checkins += s.checkins; if (s.all) perfect++; }
   }
-  return { days, done, total, perfect, pct: total ? done / total : 0 };
+  return { days, done, total, perfect, checkins, pct: total ? done / total : 0 };
+}
+// "▲ +7 vs September" (percentage points) or "▲ +2" for counts
+function delta(cur, prev, label, isPct = true) {
+  if (prev == null) return '';
+  const diff = isPct ? Math.round((cur - prev) * 100) : cur - prev;
+  if (!diff) return `<span class="delta same">= ${label ? tr('same as {when}', { when: label }) : ''}</span>`;
+  return `<span class="delta ${diff > 0 ? 'up' : 'down'}">${diff > 0 ? '▲ +' + diff : '▼ −' + Math.abs(diff)}${label ? ' ' + tr('vs {when}', { when: label }) : ''}</span>`;
+}
+
+// Insights from the last 90 days: weekday pattern, a habit's best weekday, habits that slipped or improved.
+function insightData() {
+  const t = today(), hs = habits();
+  const wd = Array.from({ length: 7 }, () => ({ v: 0, n: 0 }));
+  for (let i = 1; i <= 90; i++) {
+    const d = ymd(addDays(parse(t), -i)), s = dayStats(d, hs);
+    if (s.total) { wd[dayIdx(d)].v += s.done; wd[dayIdx(d)].n += s.total; }
+  }
+  const samples = wd.reduce((s, x) => s + x.n, 0);
+  const pcts = wd.map(x => (x.n ? x.v / x.n : null));
+  const items = [];
+  if (samples < 14) return { pcts, items, enough: false };
+  const ranked = pcts.map((p, i) => ({ p, i })).filter(x => x.p != null).sort((x, y) => y.p - x.p);
+  const dayName = i => addDays(mondayOf(new Date()), i).toLocaleDateString(LOC(), { weekday: 'long' });
+  if (ranked.length >= 2 && ranked[0].p - ranked[ranked.length - 1].p >= 0.1) {
+    items.push({ ic: '📈', title: tr('{day} is your best day', { day: dayName(ranked[0].i) }),
+      text: tr('{p} of habits done, {day} is the weakest ({q}).', { p: pct(ranked[0].p), day: dayName(ranked[ranked.length - 1].i), q: pct(ranked[ranked.length - 1].p) }) });
+  }
+  // a habit that clearly works best on one weekday
+  let bestHabit = null;
+  hs.filter(h => !isWeekly(h)).forEach(h => {
+    const per = Array.from({ length: 7 }, () => ({ d: 0, n: 0 }));
+    let all = 0, n = 0;
+    for (let i = 1; i <= 90; i++) {
+      const d = ymd(addDays(parse(t), -i));
+      if (!scheduledOn(h, d)) continue;
+      const k = dayIdx(d), v = isDone(h.id, d) ? 1 : 0;
+      per[k].n++; per[k].d += v; all += v; n++;
+    }
+    if (n < 20) return;
+    per.forEach((x, k) => {
+      if (x.n < 4) return;
+      const r = x.d / x.n, lift = r - all / n;
+      if (r >= 0.8 && lift >= 0.15 && (!bestHabit || lift > bestHabit.lift)) bestHabit = { h, k, x, lift };
+    });
+  });
+  if (bestHabit) items.push({ ic: '⭐', title: tr('"{name}" works best on {day}s', { name: bestHabit.h.data.name, day: dayName(bestHabit.k) }),
+    text: tr('Done on {a} of {b} {day}s in the last 3 months.', { a: bestHabit.x.d, b: bestHabit.x.n, day: dayName(bestHabit.k) }) });
+  // this month vs last month
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const daysOf = (yy, mm) => [...Array(daysInMonth(yy, mm))].map((_, i) => `${yy}-${pad(mm + 1)}-${pad(i + 1)}`);
+  const pm = new Date(y, m - 1, 1);
+  let slip = null, rise = null;
+  hs.forEach(h => {
+    const c = habitPeriod(h, daysOf(y, m)), p = habitPeriod(h, daysOf(pm.getFullYear(), pm.getMonth()));
+    if (c.total < 5 || p.total < 7) return;
+    const diff = c.done / c.total - p.done / p.total;
+    if (diff <= -0.12 && (!slip || diff < slip.diff)) slip = { h, diff, c: c.done / c.total, p: p.done / p.total };
+    if (diff >= 0.12 && (!rise || diff > rise.diff)) rise = { h, diff, c: c.done / c.total, p: p.done / p.total };
+  });
+  if (slip) items.push({ ic: '🧭', title: tr('"{name}" slipped', { name: slip.h.data.name }),
+    text: tr('{c} this month, down from {p}.', { c: pct(slip.c), p: pct(slip.p) }) + (slip.h.data.mini ? '' : ' ' + tr('A mini version for busy days might help.')) });
+  if (rise) items.push({ ic: '🚀', title: tr('"{name}" is improving', { name: rise.h.data.name }),
+    text: tr('{c} this month, up from {p}.', { c: pct(rise.c), p: pct(rise.p) }) });
+  return { pcts, items: items.slice(0, 3), enough: true };
+}
+function insightsPanel() {
+  const ins = insightData();
+  const names = [...Array(7)].map((_, i) => addDays(mondayOf(new Date()), i).toLocaleDateString(LOC(), { weekday: 'short' }));
+  const max = Math.max(...ins.pcts.filter(p => p != null), 0.01), bestIdx = ins.pcts.indexOf(Math.max(...ins.pcts.filter(p => p != null)));
+  return `<section class="panel span-2"><h2>${tr('Insights')}</h2>
+    ${ins.enough ? `<div class="wkbars" aria-label="${tr('Habits done by weekday, last 3 months')}">${ins.pcts.map((p, i) => `<div class="${i === bestIdx ? 'best' : ''}"><i style="height:${p == null ? 2 : Math.max(4, Math.round(p / max * 100))}%" title="${p == null ? '' : pct(p)}"></i><small>${names[i]}</small></div>`).join('')}</div>
+      ${ins.items.length ? `<div class="insights">${ins.items.map(x => `<div class="insight"><span class="ic" aria-hidden="true">${x.ic}</span><div><b>${esc(x.title)}</b><small>${esc(x.text)}</small></div></div>`).join('')}</div>` : `<p class="note">${tr('No clear patterns yet. Keep going.')}</p>`}`
+    : `<p class="note">${tr('Insights appear after about two weeks of check-ins.')}</p>`}
+  </section>`;
 }
 
 /* ---------- calendar weeks ---------- */
@@ -194,7 +348,7 @@ function agoText(iso) {
 /* ---------- views ---------- */
 function viewToday() {
   const now = new Date(), t = today();
-  const hs = habits().filter(h => activeOn(h, t));
+  const hs = habits().filter(h => showToday(h, t));
   const ds = dayStats(t);
   const ms = monthStats(now.getFullYear(), now.getMonth());
   const streaks = habits().map(h => ({ h, s: streak(h.id) })).sort((a, b) => b.s - a.s);
@@ -203,10 +357,13 @@ function viewToday() {
   const w = workoutFor(t).w;
 
   const habitList = hs.length ? `<ul class="checklist">${hs.map(h => {
-    const done = isDone(h.id, t), s = streak(h.id);
-    return `<li><button class="check-row ${done ? 'is-done' : ''}" data-action="toggle" data-h="${h.id}" data-d="${t}" aria-pressed="${done}">
-      <span class="box" aria-hidden="true"></span><span class="label">${esc(h.data.name)}</span>
-      ${s ? `<span class="streak" title="${tr("Current streak")}">${tr(s === 1 ? '{n} day' : '{n} days', { n: s })}</span>` : ''}</button></li>`;
+    const done = isDone(h.id, t), mini = isMini(h.id, t), si = streakInfo(h.id), s = si.n;
+    const wp = isWeekly(h) ? weekProgress(h, t) : null;
+    const sub = [targetText(h), wp ? tr('{n} of {of} this week', { n: wp.n, of: wp.of }) : ''].filter(Boolean).join(' · ');
+    return `<li class="today-habit ${h.data.mini ? 'has-mini' : ''}"><button class="check-row ${done ? 'is-done' : ''} ${mini ? 'is-mini' : ''}" data-action="toggle" data-mode="full" data-h="${h.id}" data-d="${t}" aria-pressed="${done}">
+      <span class="box" aria-hidden="true"></span><span class="label">${esc(h.data.name)}${mini ? ` <span class="mini-tag">${tr('MINI')}</span>` : ''}${sub ? `<small class="muted sub-line">${esc(sub)}</small>` : ''}</span>
+      ${s ? `<span class="streak" title="${tr("Current streak")}">${si.weeks ? tr(s === 1 ? '{n} week' : '{n} weeks', { n: s }) : tr(s === 1 ? '{n} day' : '{n} days', { n: s })}</span>` : ''}</button>
+      ${h.data.mini ? `<button class="mini-btn ${mini ? 'on' : ''}" data-action="toggle" data-mode="mini" data-h="${h.id}" data-d="${t}" aria-pressed="${mini}" title="${tr('Mini version')}: ${esc(miniText(h))}">${tr('Mini')}<small>${esc(miniText(h))}</small></button>` : ''}</li>`;
   }).join('')}</ul>` : `<div class="empty"><p>${tr("No habits yet. Add your own, or start with a set of common ones you can edit.")}</p>
       <div class="row"><button class="btn primary" data-action="new-habit">${tr("Add a habit")}</button><button class="btn" data-action="starter">${tr("Use starter set")}</button></div></div>`;
 
@@ -217,7 +374,7 @@ function viewToday() {
   </header>
   <div class="today-layout">
     <section class="panel span-2">
-      <div class="panel-head"><h2>${tr("Habits today")}</h2><p class="figure">${ds.done}<small> ${tr('of')} ${ds.total}</small></p></div>
+      <div class="panel-head"><h2>${tr("Habits today")}</h2><p class="figure">${ds.checkins}<small> ${tr('of')} ${ds.total}</small></p></div>
       ${meter(ds.pct, tr('Habits done today'))}
       ${habitList}
     </section>
@@ -250,6 +407,9 @@ function viewHabits() {
   const y = S.month.getFullYear(), m = S.month.getMonth(), t = today(), mk = monthKey(S.month);
   const ms = monthStats(y, m), hs = habits();
   const monthName = S.month.toLocaleDateString(LOC(), { month: 'long', year: 'numeric' });
+  const pmDate = new Date(y, m - 1, 1), pms = monthStats(pmDate.getFullYear(), pmDate.getMonth());
+  const pmName = pmDate.toLocaleDateString(LOC(), { month: 'long' });
+  const hasPrev = pms.total > 0 && ms.total > 0;
   const wd = d => tr('MTWTFSS')[(parse(d).getDay() + 6) % 7];
 
   const mw = monthWeeks(y, m);
@@ -258,12 +418,14 @@ function viewHabits() {
   const head = ms.days.map(x => `<th scope="col" class="${wc(x.d)} ${x.d === t ? 'is-today' : ''}"><span class="wd">${wd(x.d)}</span><span class="dn">${parse(x.d).getDate()}</span></th>`).join('');
   const bars = ms.days.map(x => `<td class="${x.d === t ? 'is-today' : ''}"><span class="bar" style="--h:${x.future ? 0 : Math.round(x.pct * 100)}%" title="${x.future ? '' : pct(x.pct)}"></span></td>`).join('');
   const rows = hs.map(h => {
-    let cnt = 0;
+    const cov = streakInfo(h.id).covered;
+    const hp = habitPeriod(h, ms.days.map(x => x.d));
     const cells = ms.days.map(x => {
-      const done = isDone(h.id, x.d); if (done) cnt++;
-      return `<td class="${wc(x.d)} ${x.d === t ? 'is-today' : ''}"><button class="cell ${done ? 'on' : ''}" data-action="toggle" data-h="${h.id}" data-d="${x.d}" ${x.future ? 'disabled' : ''} aria-pressed="${done}" aria-label="${esc(h.data.name)}, ${fmtShort(x.d)}"></button></td>`;
+      const done = isDone(h.id, x.d), mini = isMini(h.id, x.d), sched = isWeekly(h) || scheduledOn(h, x.d) || !activeOn(h, x.d);
+      const free = !done && cov.has(x.d);
+      return `<td class="${wc(x.d)} ${x.d === t ? 'is-today' : ''}"><button class="cell ${done ? (mini ? 'mini' : 'on') : ''} ${sched ? '' : 'off'} ${free ? 'free' : ''}" data-mode="cycle" data-action="toggle" data-h="${h.id}" data-d="${x.d}" ${x.future ? 'disabled' : ''} aria-pressed="${done}" aria-label="${esc(h.data.name)}, ${fmtShort(x.d)}${mini ? ' (' + tr('mini') + ')' : ''}${free ? ' (' + tr('free day') + ')' : ''}">${free ? 'R' : ''}</button></td>`;
     }).join('');
-    return `<tr><th scope="row" class="hname"><button data-action="edit-habit" data-id="${h.id}" title="${tr("Edit habit")}"><span aria-hidden="true">${esc(areaInfo(h.data.area).icon)}</span>${esc(h.data.name)}</button></th>${cells}<td class="hcount">${cnt}<small>/${ms.days.length}</small></td></tr>`;
+    return `<tr><th scope="row" class="hname"><button data-action="edit-habit" data-id="${h.id}" title="${tr("Edit habit")}"><span aria-hidden="true">${esc(areaInfo(h.data.area).icon)}</span>${esc(h.data.name)}</button></th>${cells}<td class="hcount">${hp.weeks ? `${hp.done}<small>/${hp.total} ${tr('wk')}</small>` : `${hp.checkins}<small>/${hp.total}</small>`}</td></tr>`;
   }).join('');
 
   // area breakdown for this month
@@ -273,7 +435,7 @@ function viewHabits() {
     const ah = hs.filter(h => a.id === '__none' ? !allAreas().some(x => x.id === h.data.area) : h.data.area === a.id);
     if (!ah.length) return '';
     let d = 0, tot = 0;
-    ms.days.filter(x => !x.future).forEach(x => ah.forEach(h => { if (activeOn(h, x.d)) { tot++; if (isDone(h.id, x.d)) d++; } }));
+    ms.days.filter(x => !x.future).forEach(x => ah.forEach(h => { if (scheduledOn(h, x.d)) { tot++; d += valueOn(h.id, x.d); } }));
     return `<li><span>${esc(a.icon)} ${esc(a.label)}</span><span class="muted">${tr(ah.length === 1 ? '{n} habit' : '{n} habits', { n: ah.length })}</span>${meter(tot ? d / tot : 0, a.label)}<span class="num">${tot ? pct(d / tot) : '–'}</span></li>`;
   }).join('');
 
@@ -299,9 +461,9 @@ function viewHabits() {
     <button class="icon-btn" data-action="month" data-dir="1" aria-label="${tr("Next month")}">›</button>
   </header>
   <div class="summary">
-    <div><span class="figure">${pct(ms.pct)}</span><span class="muted">${tr("completed")}</span></div>
-    <div><span class="figure">${ms.perfect}</span><span class="muted">${tr("perfect days")}</span></div>
-    <div><span class="figure">${ms.done}</span><span class="muted">${tr("check-ins")}</span></div>
+    <div><span class="figure">${pct(ms.pct)}</span><span class="muted">${tr("completed")}</span>${hasPrev ? delta(ms.pct, pms.pct, pmName) : ''}</div>
+    <div><span class="figure">${ms.perfect}</span><span class="muted">${tr("perfect days")}</span>${hasPrev ? delta(ms.perfect, pms.perfect, '', false) : ''}</div>
+    <div><span class="figure">${ms.checkins}</span><span class="muted">${tr("check-ins")}</span></div>
     <span class="summary-actions"><button class="btn" data-action="open-month" data-m="${mk}">${tr('Month review')}</button><button class="btn" data-action="open-year" data-y="${y}">${tr('Year overview')}</button><button class="btn primary" data-action="new-habit">${tr("Add habit")}</button></span>
   </div>
   ${hs.length ? `
@@ -333,6 +495,7 @@ function viewHabits() {
     </section>
     <section class="panel span-2"><div class="panel-head"><h2>${tr("By area")}</h2><button class="btn small" data-action="areas">${tr('Manage areas')}</button></div>
       ${areaRows ? `<ul class="area-list">${areaRows}</ul>` : `<p class="note">${tr('Group your habits into areas like Health or Music. Add your own with "Manage areas".')}</p>`}</section>
+    ${hs.length ? insightsPanel() : ''}
   </div>`;
 }
 
@@ -466,7 +629,7 @@ function viewTrain() {
   <div class="summary">
     <div><span class="figure">${done}<small>/${planned}</small></span><span class="muted">${tr('exercises done')}</span></div>
     <div><span class="figure">${Math.round(volume).toLocaleString(LOC())}</span><span class="muted">${tr('kg moved')}</span></div>
-    <a class="btn primary" href="#plan">${tr(hasPlan() ? 'Weekly plan' : 'Set up weekly plan')}</a>
+    <span class="summary-actions"><a class="btn" href="#progress">${tr('Progress')}</a><a class="btn primary" href="#plan">${tr(hasPlan() ? 'Weekly plan' : 'Set up weekly plan')}</a></span>
   </div>
   ${!hasPlan() ? `<p class="note hint">${tr('Tip: set up a weekly plan once, and every week fills itself in automatically.')} <button class="link" data-action="copy-week">${tr('Or copy last week')}</button></p>` : ''}
   <div class="days">${cards}</div>
@@ -496,11 +659,7 @@ function viewPlan() {
 function monthReview(y, m) {
   const ms = monthStats(y, m), t = today(), hs = habits();
   const past = ms.days.filter(x => !x.future);
-  const per = hs.map(h => {
-    let done = 0, total = 0, run = 0, best = 0;
-    past.forEach(x => { if (!activeOn(h, x.d)) return; total++; if (isDone(h.id, x.d)) { done++; run++; best = Math.max(best, run); } else run = 0; });
-    return { h, done, total, best };
-  }).filter(p => p.total);
+  const per = hs.map(h => ({ h, ...habitPeriod(h, ms.days.map(x => x.d)) })).filter(p => p.total);
   const weeks = monthWeeks(y, m).map(w => {
     const ds = ms.days.filter(x => w.days.includes(x.d) && !x.future);
     let d = 0, tt = 0;
@@ -520,7 +679,8 @@ function monthReview(y, m) {
   const goals = list('goal').filter(g => g.data.month === prefix).sort((a2, b2) => (a2.data.order ?? 0) - (b2.data.order ?? 0));
   const weekly = list('weekly_habit').sort((a2, b2) => (a2.data.order ?? 0) - (b2.data.order ?? 0))
     .map(r => ({ name: r.data.name, n: weeks.filter(w => r.data.weeks?.[w.key]).length, of: weeks.length }));
-  return { ms, per, weeks, workouts, kg, exDone, tasksDone, goals, weekly };
+  const pmd = new Date(y, m - 1, 1), prev = monthStats(pmd.getFullYear(), pmd.getMonth());
+  return { ms, per, weeks, workouts, kg, exDone, tasksDone, goals, weekly, prev, prevName: pmd.toLocaleDateString(LOC(), { month: 'long' }) };
 }
 const monthTitle = (y, m) => new Date(y, m, 1).toLocaleDateString(LOC(), { month: 'long', year: 'numeric' });
 
@@ -554,9 +714,9 @@ function viewMonth() {
     <button class="icon-btn" data-action="review-month" data-dir="1" aria-label="${tr('Next month')}">›</button>
   </header>
   <div class="summary">
-    <div><span class="figure">${pct(r.ms.pct)}</span><span class="muted">${tr('habits completed')}</span></div>
-    <div><span class="figure">${r.ms.perfect}</span><span class="muted">${tr('perfect days')}</span></div>
-    <div><span class="figure">${r.ms.done}</span><span class="muted">${tr('check-ins')}</span></div>
+    <div><span class="figure">${pct(r.ms.pct)}</span><span class="muted">${tr('habits completed')}</span>${r.prev.total && r.ms.total ? delta(r.ms.pct, r.prev.pct, r.prevName) : ''}</div>
+    <div><span class="figure">${r.ms.perfect}</span><span class="muted">${tr('perfect days')}</span>${r.prev.total && r.ms.total ? delta(r.ms.perfect, r.prev.perfect, '', false) : ''}</div>
+    <div><span class="figure">${r.ms.checkins}</span><span class="muted">${tr('check-ins')}</span></div>
     <div><span class="figure">${r.workouts}</span><span class="muted">${tr('workouts')}</span></div>
     <span class="summary-actions"><button class="btn primary" data-action="pdf" data-kind="month" data-p="${S.reviewMonth}">${tr('Save as PDF')}</button></span>
   </div>
@@ -575,7 +735,7 @@ function viewMonth() {
       ${r.per.length ? `<ul class="year-habits">${[...r.per].sort((a2, b2) => b2.done / b2.total - a2.done / a2.total).map(p => `<li>
         <span class="label">${esc(areaInfo(p.h.data.area).icon)} ${esc(p.h.data.name)}</span><span class="num">${pct(p.done / p.total)}</span>
         ${meter(p.done / p.total, p.h.data.name)}
-        <span class="muted">${tr('{n} check-ins · best streak {b} days', { n: p.done, b: p.best })}</span></li>`).join('')}</ul>` : `<p class="note">${tr('No habit data for this month yet.')}</p>`}
+        <span class="muted">${habitDetail(p)}</span></li>`).join('')}</ul>` : `<p class="note">${tr('No habit data for this month yet.')}</p>`}
     </section>
     <section class="panel">
       <h2>${tr('Training and tasks')}</h2>
@@ -588,8 +748,12 @@ function viewMonth() {
       ${r.weekly.length ? `<h3 class="day-label">${tr('Weekly habits')}</h3><dl class="stats">${r.weekly.map(w => `<div><dt>${esc(w.name)}</dt><dd>${w.n}<small>/${w.of}</small></dd></div>`).join('')}</dl>` : ''}
       ${r.goals.length ? `<h3 class="day-label">${tr('Goals')}</h3><ul class="goal-list">${r.goals.map(g => `<li class="${g.data.done ? 'is-done' : ''}"><span class="box" aria-hidden="true"></span>${esc(g.data.title)}</li>`).join('')}</ul>` : ''}
     </section>
+    ${S.reviewMonth === monthKey(new Date()) && habits().length ? insightsPanel() : ''}
   </div>`;
 }
+
+const habitDetail = p => p.weeks ? tr('{n} of {of} weeks reached · {c} check-ins', { n: p.done, of: p.total, c: p.checkins })
+  : tr('{n} check-ins · best streak {b} days', { n: p.checkins, b: p.best });
 
 /* ---------- reviews list + PDF ---------- */
 function reviewPeriods() {
@@ -627,7 +791,7 @@ function monthPdfData(key) {
   const wdNames = [...Array(7)].map((_, i) => addDays(mondayOf(new Date()), i).toLocaleDateString(LOC(), { weekday: 'short' }));
   return {
     kicker: tr('Monthly review'), title: monthTitle(y, m), filename: `${tr('Review')}-${key}.pdf`, footer: pdfFooter(), labels: pdfLabels(),
-    stats: [[tr('habits completed'), pct(r.ms.pct)], [tr('perfect days'), String(r.ms.perfect)], [tr('check-ins'), String(r.ms.done)], [tr('workouts'), String(r.workouts)]],
+    stats: [[tr('habits completed'), pct(r.ms.pct)], [tr('perfect days'), String(r.ms.perfect)], [tr('check-ins'), String(r.ms.checkins)], [tr('workouts'), String(r.workouts)]],
     highlights: [best && [tr('Most consistent'), best.h.data.name, pct(best.done / best.total)], bestWeek && [tr('Best week'), cwLabel(bestWeek.key), pct(bestWeek.pct)],
       longest && longest.best && [tr('Longest streak'), longest.h.data.name, tr('{n} days', { n: longest.best })]].filter(Boolean),
     weeks: r.weeks.map(w => ({ label: cwLabel(w.key), range: `${fmtShort(w.days[0])} – ${fmtShort(w.days[w.days.length - 1])}`, pct: w.pct, color: weekNum(w.key) % 6 })),
@@ -635,7 +799,7 @@ function monthPdfData(key) {
       const first = weekdayIdx(w.days[0]);
       return { label: cwLabel(w.key), color: weekNum(w.key) % 6, cells: [...Array(7)].map((_, i) => { const d = w.days[i - first]; if (!d) return null; const x = r.ms.days.find(z => z.d === d); return { day: parse(d).getDate(), pct: x.total ? x.pct : null, future: x.future }; }) };
     }) },
-    habits: [...r.per].sort((a2, b2) => b2.done / b2.total - a2.done / a2.total).map(p => ({ name: `${p.h.data.name}`, pct: p.done / p.total, detail: tr('{n} check-ins · best streak {b} days', { n: p.done, b: p.best }) })),
+    habits: [...r.per].sort((a2, b2) => b2.done / b2.total - a2.done / a2.total).map(p => ({ name: `${p.h.data.name}`, pct: p.done / p.total, detail: habitDetail(p) })),
     lists: [
       { title: tr('Weekly habits'), items: r.weekly.map(w => [w.name, `${w.n} / ${w.of}`]) },
       { title: tr('Training and tasks'), items: [[tr('Workouts'), String(r.workouts)], [tr('Exercises done'), String(r.exDone)], [tr('kg moved'), Math.round(r.kg).toLocaleString(LOC())], [tr('Tasks completed'), String(r.tasksDone)]] },
@@ -652,11 +816,11 @@ function yearPdfData(Y) {
   const mName = (m2, f = 'short') => new Date(y, m2, 1).toLocaleDateString(LOC(), { month: f });
   return {
     kicker: tr('Year in review'), title: tr('Your year {y}', { y }), filename: `${tr('Review')}-${y}.pdf`, footer: pdfFooter(), labels: pdfLabels(),
-    stats: [[tr('habits completed'), pct(ys.pct)], [tr('perfect days'), String(ys.perfect)], [tr('check-ins'), ys.done.toLocaleString(LOC())], [tr('workouts'), String(ys.workouts)]],
+    stats: [[tr('habits completed'), pct(ys.pct)], [tr('perfect days'), String(ys.perfect)], [tr('check-ins'), ys.checkins.toLocaleString(LOC())], [tr('workouts'), String(ys.workouts)]],
     highlights: [best && [tr('Most consistent'), best.h.data.name, pct(best.done / best.total)], bestMonth && [tr('Best month'), mName(bestMonth.m, 'long'), pct(bestMonth.pct)],
       longest && longest.best && [tr('Longest streak'), longest.h.data.name, tr('{n} days', { n: longest.best })]].filter(Boolean),
     heat: { type: 'year', rows: ys.months.map(mo => ({ label: mName(mo.m), end: mo.pct == null ? '' : pct(mo.pct), cells: [...Array(31)].map((_, i) => { const x = mo.days[i]; return x ? { pct: x.future ? null : x.pct, future: !!x.future } : null; }) })) },
-    habits: [...withData].sort((a2, b2) => b2.done / b2.total - a2.done / a2.total).map(p => ({ name: p.h.data.name, pct: p.done / p.total, detail: tr('{n} check-ins · best streak {b} days', { n: p.done, b: p.best }) })),
+    habits: [...withData].sort((a2, b2) => b2.done / b2.total - a2.done / a2.total).map(p => ({ name: p.h.data.name, pct: p.done / p.total, detail: habitDetail(p) })),
     lists: [
       { title: tr('Workouts per month'), items: ys.wmonths.map((n2, m2) => [mName(m2, 'long'), String(n2)]).filter(([, v]) => v !== '0') },
       { title: tr('Training and tasks'), items: [[tr('Workouts'), String(ys.workouts)], [tr('kg moved'), Math.round(ys.kg).toLocaleString(LOC())], [tr('Tasks completed'), String(ys.tasksDone)], [tr('Goals reached'), `${ys.goalsDone} / ${ys.goals}`]] },
@@ -665,32 +829,93 @@ function yearPdfData(Y) {
   };
 }
 
+/* ---------- exercise progress ---------- */
+function exerciseHistory() {
+  const map = new Map();
+  list('workout').forEach(r => {
+    const d = r.data.date || r.id.slice(8);
+    (r.data.exercises || []).forEach(e => {
+      const name = (e.name || '').trim();
+      if (!e.done || !name) return;
+      const key = name.toLowerCase();
+      if (!map.has(key)) map.set(key, { name, sessions: [] });
+      map.get(key).sessions.push({ d, w: +e.weight || 0, sets: +e.sets || 0, reps: +e.reps || 0 });
+    });
+  });
+  return [...map.values()].map(x => ({ ...x, sessions: x.sessions.sort((p, q) => p.d.localeCompare(q.d)) })).sort((p, q) => q.sessions.length - p.sessions.length);
+}
+function progressChart(sessions, metric) {
+  const pts = sessions.slice(-120), W = 320, H = 160, P = 30;
+  const vals = pts.map(s => metric(s)), lo = Math.min(...vals), hi = Math.max(...vals);
+  const span = hi - lo || 1, x = i => P + (pts.length === 1 ? (W - P - 10) / 2 : i * (W - P - 10) / (pts.length - 1)), y = v => H - 24 - (v - lo) / span * (H - 48);
+  const path = pts.map((s, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(vals[i]).toFixed(1)}`).join(' ');
+  const ticks = [lo, lo + span / 2, hi].map(v => Math.round(v * 10) / 10);
+  const labels = [0, Math.floor((pts.length - 1) / 2), pts.length - 1].filter((v, i, arr) => arr.indexOf(v) === i)
+    .map((i, k, arr) => `<text x="${x(i).toFixed(1)}" y="${H - 6}" font-size="10" fill="var(--muted)" text-anchor="${k === 0 && arr.length > 1 ? 'start' : k === arr.length - 1 && arr.length > 1 ? 'end' : 'middle'}">${fmtShort(pts[i].d)}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${tr('Progress chart')}">
+    ${ticks.map(v => `<line x1="${P}" x2="${W - 6}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--line)" stroke-dasharray="3 4"/><text x="2" y="${(y(v) + 4).toFixed(1)}" font-size="10" fill="var(--muted)">${v}</text>`).join('')}
+    <path d="${path} L${x(pts.length - 1).toFixed(1)},${H - 24} L${x(0).toFixed(1)},${H - 24} Z" fill="var(--sage-soft)" opacity=".55"/>
+    <path d="${path}" fill="none" stroke="var(--sage)" stroke-width="2.5" stroke-linejoin="round"/>
+    ${pts.map((s, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(vals[i]).toFixed(1)}" r="${i === pts.length - 1 ? 5 : pts.length > 40 ? 1.8 : 3}" fill="${i === pts.length - 1 ? 'var(--ochre)' : 'var(--sage)'}"><title>${fmtShort(s.d)}: ${vals[i]}</title></circle>`).join('')}
+    ${labels}</svg>`;
+}
+function viewProgress() {
+  const all = exerciseHistory();
+  if (!S.exercise) {
+    return `<header class="page-head with-nav"><a class="icon-btn" href="#train" aria-label="${tr('Back to training')}">‹</a><h1>${tr('Progress')}</h1></header>
+    ${all.length ? `<div class="project-grid">${all.map(ex => {
+      const s = ex.sessions, last = s[s.length - 1], first = s[0], byW = s.some(z => z.w);
+      const diff = byW ? last.w - first.w : last.reps - first.reps;
+      return `<a class="panel project" href="#progress/${encodeURIComponent(ex.name)}">
+        <span class="pname">${esc(ex.name)}</span>
+        <span class="muted">${tr(s.length === 1 ? '{n} session' : '{n} sessions', { n: s.length })}</span>
+        <span class="figure">${byW ? `${last.w} kg` : tr('{n} reps', { n: last.reps })}</span>
+        ${s.length > 1 && diff ? `<span class="delta ${diff > 0 ? 'up' : 'down'}">${diff > 0 ? '▲ +' : '▼ −'}${Math.abs(Math.round(diff * 10) / 10)}${byW ? ' kg' : ''} ${tr('since {date}', { date: fmtShort(first.d) })}</span>` : ''}
+      </a>`;
+    }).join('')}</div>` : `<section class="panel"><p class="note">${tr('Check off exercises in your training plan, and their progress shows up here.')}</p></section>`}`;
+  }
+  const ex = all.find(z => z.name.toLowerCase() === S.exercise.toLowerCase());
+  if (!ex) return `<header class="page-head with-nav"><a class="icon-btn" href="#progress" aria-label="${tr('Back')}">‹</a><h1>${esc(S.exercise)}</h1></header><section class="panel"><p class="note">${tr('No completed sessions yet.')}</p></section>`;
+  const s = ex.sessions, byW = s.some(z => z.w), metric = byW ? z => z.w : z => z.reps;
+  const last = s[s.length - 1], first = s[0], best = s.reduce((b, z) => (metric(z) > metric(b) ? z : b), s[0]);
+  const diff = metric(last) - metric(first);
+  const fmt = z => `${z.w ? `${z.w} kg · ` : ''}${z.sets || 1} × ${z.reps || '–'}`;
+  return `
+  <header class="page-head with-nav"><a class="icon-btn" href="#progress" aria-label="${tr('Back')}">‹</a>
+    <div class="head-stack"><p class="sub">${tr('Exercise progress')}</p><h1>${esc(ex.name)}</h1></div></header>
+  <div class="summary">
+    <div><span class="figure">${byW ? `${last.w} kg` : last.reps}</span><span class="muted">${tr(byW ? 'current weight' : 'current reps')}</span></div>
+    ${s.length > 1 ? `<div><span class="figure">${diff > 0 ? '+' : ''}${Math.round(diff * 10) / 10}${byW ? ' kg' : ''}</span><span class="muted">${tr('since {date}', { date: fmtShort(first.d) })}</span></div>` : ''}
+    <div><span class="figure">${s.length}</span><span class="muted">${tr('sessions')}</span></div>
+  </div>
+  <section class="panel">${s.length > 1 ? progressChart(s, metric) : `<p class="note">${tr('The chart appears after your second session.')}</p>`}
+    <p class="note">${tr('Best: {what} on {date}', { what: fmt(best), date: fmtShort(best.d) })}</p></section>
+  <section class="panel" style="margin-top:14px"><h2>${tr('Last sessions')}</h2>
+    <dl class="stats">${s.slice(-6).reverse().map(z => `<div><dt>${parse(z.d).toLocaleDateString(LOC(), { weekday: 'short', day: 'numeric', month: 'short' })}</dt><dd class="small-dd">${fmt(z)}</dd></div>`).join('')}</dl></section>`;
+}
+
 /* ---------- year overview ---------- */
 function yearStats(y) {
   const t = today(), hs = habits();
   const months = [];
-  let done = 0, total = 0, perfect = 0;
-  const per = new Map(hs.map(h => [h.id, { h, done: 0, total: 0, best: 0, run: 0 }]));
+  let done = 0, total = 0, perfect = 0, checkins = 0;
+  const allDays = [];
   for (let m = 0; m < 12; m++) {
     const n = daysInMonth(y, m), days = [];
     let md = 0, mt = 0;
     for (let i = 1; i <= n; i++) {
       const d = `${y}-${pad(m + 1)}-${pad(i)}`;
+      allDays.push(d);
       if (d > t) { days.push({ d, future: true }); continue; }
-      let dd = 0, tt = 0;
-      for (const h of hs) {
-        const p = per.get(h.id);
-        if (!activeOn(h, d)) continue;
-        tt++; p.total++;
-        if (isDone(h.id, d)) { dd++; p.done++; p.run++; p.best = Math.max(p.best, p.run); } else p.run = 0;
-      }
-      days.push({ d, pct: tt ? dd / tt : null });
-      md += dd; mt += tt;
-      if (tt && dd === tt) perfect++;
+      const s = dayStats(d, hs);
+      days.push({ d, pct: s.total ? s.pct : null });
+      md += s.done; mt += s.total; checkins += s.checkins;
+      if (s.all) perfect++;
     }
     done += md; total += mt;
     months.push({ m, days, pct: mt ? md / mt : null });
   }
+  const per = hs.map(h => ({ h, ...habitPeriod(h, allDays) }));
   // training
   const wmonths = Array(12).fill(0);
   let workouts = 0, kg = 0;
@@ -703,11 +928,12 @@ function yearStats(y) {
   });
   const tasksDone = list('task').filter(x => x.data.done && (x.data.doneAt || x.updated_at || '').startsWith(`${y}`)).length;
   const goals = list('goal').filter(g => (g.data.month || '').startsWith(`${y}-`));
-  return { months, done, total, perfect, pct: total ? done / total : 0, per: [...per.values()], wmonths, workouts, kg, tasksDone, goals: goals.length, goalsDone: goals.filter(g => g.data.done).length };
+  return { months, done, total, perfect, checkins, pct: total ? done / total : 0, per, wmonths, workouts, kg, tasksDone, goals: goals.length, goalsDone: goals.filter(g => g.data.done).length };
 }
 
 function viewYear() {
-  const y = S.year, ys = yearStats(y);
+  const y = S.year, ys = yearStats(y), prev = yearStats(y - 1);
+  const hasPrev = prev.total > 0 && ys.total > 0;
   const monthName = m => new Date(y, m, 1).toLocaleDateString(LOC(), { month: 'short' });
   const lvl = p => p == null ? 'l0' : p === 0 ? 'l0 miss' : p < 0.34 ? 'l1' : p < 0.67 ? 'l2' : p < 1 ? 'l3' : 'l4';
   const heat = ys.months.map(mo => `<tr><th scope="row">${monthName(mo.m)}</th>${[...Array(31)].map((_, i) => {
@@ -732,9 +958,9 @@ function viewYear() {
     <button class="icon-btn" data-action="year" data-dir="1" aria-label="${tr('Next year')}">›</button>
   </header>
   <div class="summary">
-    <div><span class="figure">${pct(ys.pct)}</span><span class="muted">${tr('habits completed')}</span></div>
-    <div><span class="figure">${ys.perfect}</span><span class="muted">${tr('perfect days')}</span></div>
-    <div><span class="figure">${ys.done.toLocaleString(LOC())}</span><span class="muted">${tr('check-ins')}</span></div>
+    <div><span class="figure">${pct(ys.pct)}</span><span class="muted">${tr('habits completed')}</span>${hasPrev ? delta(ys.pct, prev.pct, String(y - 1)) : ''}</div>
+    <div><span class="figure">${ys.perfect}</span><span class="muted">${tr('perfect days')}</span>${hasPrev ? delta(ys.perfect, prev.perfect, '', false) : ''}</div>
+    <div><span class="figure">${ys.checkins.toLocaleString(LOC())}</span><span class="muted">${tr('check-ins')}</span></div>
     <div><span class="figure">${ys.workouts}</span><span class="muted">${tr('workouts')}</span></div>
     <span class="summary-actions"><button class="btn primary" data-action="pdf" data-kind="year" data-p="${y}">${tr('Save as PDF')}</button></span>
   </div>
@@ -750,7 +976,7 @@ function viewYear() {
       ${withData.length ? `<ul class="year-habits">${withData.sort((a, b) => b.done / b.total - a.done / a.total).map(p => `<li>
         <span class="label">${esc(areaInfo(p.h.data.area).icon)} ${esc(p.h.data.name)}</span><span class="num">${pct(p.done / p.total)}</span>
         ${meter(p.done / p.total, p.h.data.name)}
-        <span class="muted">${tr('{n} check-ins · best streak {b} days', { n: p.done, b: p.best })}</span></li>`).join('')}</ul>` : `<p class="note">${tr('No habit data for this year yet.')}</p>`}
+        <span class="muted">${habitDetail(p)}</span></li>`).join('')}</ul>` : `<p class="note">${tr('No habit data for this year yet.')}</p>`}
     </section>
     <section class="panel">
       <h2>${tr('Training and tasks')}</h2>
@@ -856,6 +1082,10 @@ function viewMore() {
       <button class="btn danger" data-action="erase">${tr("Erase everything")}</button>
     </div>
   </section>
+  ${sync.status.user ? `<section class="panel danger-zone"><h2>${tr('Delete account')}</h2>
+    <p class="note">${tr('Deletes your account and everything stored in the cloud: habits, tasks, workouts, documents and notification settings, on all devices. This can\'t be undone.')}</p>
+    <p class="hintbox">${tr('Tip: export a backup first. You can import it again later.')}</p>
+    <div class="row"><button class="btn" data-action="export">${tr('Export backup')}</button><button class="btn danger" data-action="delete-account">${tr('Delete account…')}</button></div></section>` : ''}
   ${S.installPrompt ? `<section class="panel"><h2>${tr("Install")}</h2><p class="note">${tr("Add the app to your home screen or dock.")}</p><button class="btn primary" data-action="install">${tr("Install app")}</button></section>` : ''}`;
 }
 
@@ -864,11 +1094,11 @@ function render() {
   const main = $('#main');
   const scroll = window.scrollY;
   const keepScroll = render.lastView === S.view;
-  const views = { today: viewToday, habits: viewHabits, tasks: viewTasks, train: viewTrain, more: viewMore, plan: viewPlan, year: viewYear, month: viewMonth };
+  const views = { today: viewToday, habits: viewHabits, tasks: viewTasks, train: viewTrain, more: viewMore, plan: viewPlan, year: viewYear, month: viewMonth, progress: viewProgress };
   const gridScroll = keepScroll ? [...document.querySelectorAll('.grid-scroll')].map(g => g.scrollLeft) : [];
   main.innerHTML = views[S.view]();
   document.querySelectorAll('.grid-scroll').forEach((g, i) => { if (gridScroll[i] != null) g.scrollLeft = gridScroll[i]; });
-  const navView = { plan: 'train', year: 'habits', month: 'habits' }[S.view] || S.view;
+  const navView = { plan: 'train', year: 'habits', month: 'habits', progress: 'train' }[S.view] || S.view;
   document.querySelectorAll('[data-nav]').forEach(a => a.setAttribute('aria-current', a.dataset.nav === navView ? 'page' : 'false'));
   if (keepScroll) window.scrollTo(0, scroll); else window.scrollTo(0, 0);
   if (S.view === 'habits' && (!keepScroll || render.lastMonth !== monthKey(S.month))) { // show today in the grid
@@ -884,10 +1114,38 @@ function render() {
 }
 
 /* ---------- forms in modal ---------- */
+const UNITS = ['minutes', 'pages', 'times', 'km', 'glasses', 'liters', 'steps'];
+function scheduleFields(h) {
+  const d = h?.data || {}, f = d.freq || 'daily', days = d.days || [0, 1, 2, 3, 4, 5, 6];
+  const custom = f !== 'daily' || d.target || d.mini;
+  const names = [...Array(7)].map((_, i) => addDays(mondayOf(new Date()), i).toLocaleDateString(LOC(), { weekday: 'narrow' }));
+  const summary = [f === 'days' ? days.map(i => addDays(mondayOf(new Date()), i).toLocaleDateString(LOC(), { weekday: 'short' })).join(', ') : f === 'weekly' ? tr('{n}× per week', { n: d.perWeek || 3 }) : tr('Every day'),
+    d.target ? `${d.target} ${tr(d.unit || '')}`.trim() : ''].filter(Boolean).join(' · ');
+  return `<details class="sched" ${custom ? 'open' : ''}>
+    <summary>${tr('Schedule & target')}<span class="muted">${esc(summary)}</span></summary>
+    <div class="sched-body" data-freq="${f}">
+      <div class="field">${tr('How often')}
+        <div class="seg3" role="radiogroup">${[['daily', 'Every day'], ['days', 'Specific days'], ['weekly', '× per week']].map(([v, l]) => `<label><input type="radio" name="freq" value="${v}" ${f === v ? 'checked' : ''} class="sr"><span>${tr(l)}</span></label>`).join('')}</div>
+      </div>
+      <div class="days7 only-days">${names.map((n, i) => `<label><input type="checkbox" name="days" value="${i}" ${days.includes(i) ? 'checked' : ''} class="sr"><span>${n}</span></label>`).join('')}</div>
+      <label class="field only-weekly">${tr('Times per week')}<select name="perWeek">${[1, 2, 3, 4, 5, 6].map(n => `<option ${+(d.perWeek || 3) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <p class="hintbox only-days">${tr('Only the chosen days count. Other days don\'t lower your score.')}</p>
+      <p class="hintbox only-weekly">${tr('Check it off on any days. The week counts once you reach the number.')}</p>
+      <div class="two">
+        <label class="field">${tr('Target (optional)')}<input name="target" type="number" inputmode="decimal" min="0" step="any" value="${esc(d.target || '')}" placeholder="15"></label>
+        <label class="field">${tr('Unit')}<input name="unit" list="unit-list" value="${esc(d.unit ? tr(d.unit) : '')}" placeholder="${tr('minutes')}"></label>
+      </div>
+      <label class="field">${tr('Mini version (optional)')}<input name="mini" type="number" inputmode="decimal" min="0" step="any" value="${esc(d.mini || '')}" placeholder="5"></label>
+      <p class="hintbox">${tr('For busy days: a mini version keeps your streak going and counts as half in your stats.')}</p>
+      <datalist id="unit-list">${UNITS.map(u => `<option value="${tr(u)}">`).join('')}</datalist>
+    </div>
+  </details>`;
+}
 function habitForm(h, preset) {
   openModal(`<form data-form="habit" data-id="${h ? h.id : ''}">
     <h2>${tr(h ? 'Edit habit' : 'New habit')}</h2>
     <label>${tr("Name")}<input name="name" required value="${esc(preset?.name ?? h?.data.name ?? '')}" placeholder="${tr("e.g. Drink 2 L of water")}"></label>
+    ${scheduleFields(h)}
     <label>${tr("Area")}<select name="area">${areaOptions(preset?.area ?? h?.data.area ?? (allAreas()[0]?.id || ''))}</select></label>
     <button type="button" class="link small-link" data-action="new-area" data-from="habit">${tr('+ New area')}</button>
     ${h ? `<p class="note">${tr('Best streak: {best} days. Current: {cur} days.', { best: bestStreak(h.id), cur: streak(h.id) })}</p>` : ''}
@@ -1020,10 +1278,16 @@ async function editWorkout(d, fn) {
 const nextOrder = kind => Math.max(0, ...list(kind).map(r => r.data.order ?? 0)) + 1;
 
 const actions = {
-  async toggle({ h, d }) {
+  // mode "full": tap on Today · "mini": the Mini button · "cycle": grid cell (empty → done → mini → empty)
+  async toggle({ h, d, mode }) {
     const hab = get(h);
     if (hab && hab.data.start && d < hab.data.start) await save('habit', h, { ...hab.data, start: d });
-    await save('habit_log', logId(h, d), { habitId: h, date: d, done: !isDone(h, d) });
+    const cur = isDone(h, d) ? (isMini(h, d) ? 'mini' : 'full') : 'none';
+    let next;
+    if (mode === 'mini') next = cur === 'mini' ? 'none' : 'mini';
+    else if (mode === 'cycle') next = cur === 'none' ? 'full' : cur === 'full' && hab?.data.mini ? 'mini' : 'none';
+    else next = cur === 'none' ? 'full' : 'none';
+    await save('habit_log', logId(h, d), { habitId: h, date: d, done: next !== 'none', level: next === 'none' ? '' : next });
     render();
   },
   'new-habit': () => habitForm(null),
@@ -1197,6 +1461,14 @@ const actions = {
       <div class="row end"><button type="button" class="btn" data-action="close">${tr("Cancel")}</button><button class="btn primary">${tr("Send link")}</button></div></form>`);
   },
   'change-password': () => passwordForm(false),
+  'delete-account'() {
+    const word = tr('DELETE');
+    openModal(`<form data-form="delete-account">
+      <h2>${tr('Delete account')}</h2>
+      <p class="note">${tr('Everything in the cloud and on this device will be deleted. Type {word} to confirm.', { word: `<b>${word}</b>` })}</p>
+      <label>${tr('Confirmation')}<input name="confirm" autocomplete="off" required placeholder="${word}"></label>
+      <div class="row end"><button type="button" class="btn" data-action="close">${tr('Cancel')}</button><button class="btn danger">${tr('Delete for good')}</button></div></form>`);
+  },
   'att-add-link'() {
     const u = $('#att-url'), ti = $('#att-title');
     const link = att.makeLink(u.value, ti.value);
@@ -1247,7 +1519,14 @@ const forms = {
   },
   async habit(fd, id) {
     const old = id ? get(id) : null;
-    await save('habit', id || uid(), { ...(old?.data || { order: nextOrder('habit'), start: today() }), name: fd.get('name').trim(), area: fd.get('area') });
+    let freq = fd.get('freq') || 'daily';
+    const days = fd.getAll('days').map(Number).sort();
+    if (freq === 'days' && (!days.length || days.length === 7)) freq = 'daily';
+    const unitIn = (fd.get('unit') || '').trim();
+    const unit = UNITS.find(u => tr(u).toLowerCase() === unitIn.toLowerCase() || u === unitIn.toLowerCase()) || unitIn;
+    const num = v => { const n = parseFloat(String(v || '').replace(',', '.')); return n > 0 ? n : ''; };
+    await save('habit', id || uid(), { ...(old?.data || { order: nextOrder('habit'), start: today() }), name: fd.get('name').trim(), area: fd.get('area'),
+      freq, days: freq === 'days' ? days : [], perWeek: freq === 'weekly' ? +fd.get('perWeek') || 3 : '', target: num(fd.get('target')), unit: num(fd.get('target')) || num(fd.get('mini')) ? unit : '', mini: num(fd.get('mini')) });
   },
   async weekly(fd, id) {
     const old = id ? get(id) : null;
@@ -1265,6 +1544,18 @@ const forms = {
     const rid = id || S.att?.ownerId || uid(), old = get(rid);
     const attachments = finishAtt() ?? old?.data.attachments ?? [];
     await save('project', rid, { ...(old?.data || {}), name: fd.get('name').trim(), deadline: fd.get('deadline') || '', attachments });
+  },
+  async 'delete-account'(fd) {
+    if ((fd.get('confirm') || '').trim().toUpperCase() !== tr('DELETE').toUpperCase()) throw new Error(tr('Type {word} to confirm.', { word: tr('DELETE') }));
+    if (!navigator.onLine) throw new Error('No connection. Try again when you are online.');
+    try { await push.disable(); } catch {}
+    const { data, error } = await sync.getClient().functions.invoke('account', { body: { action: 'delete' } });
+    if (error || data?.error) throw new Error(data?.error || error.message);
+    try { await sync.signOut(); } catch {}
+    await db.clearAll(); S.recs.clear();
+    try { ['lastSync', 'googleCache'].forEach(k => localStorage.removeItem(k)); } catch {}
+    toast('Your account was deleted');
+    location.hash = '#today';
   },
   async auth(fd) {
     try { await sync.signIn(fd.get('email').trim(), fd.get('password')); }
@@ -1316,6 +1607,7 @@ document.addEventListener('submit', async e => {
 document.addEventListener('change', async e => {
   const el = e.target;
   if (el.id === 'import-file' && el.files[0]) return importFile(el.files[0]);
+  if (el.name === 'freq') { el.closest('.sched-body').dataset.freq = el.value; return; }
   if (el.id === 'att-file' && el.files.length) { const files = [...el.files]; el.value = ''; return attUpload(files); }
   if (el.dataset.notif) {
     const k = el.dataset.notif, cur = notifySettings()[k];
@@ -1367,6 +1659,8 @@ function applyTheme() {
 
 function route() {
   const v = location.hash.slice(1);
+  if (v.startsWith('progress/')) { S.exercise = decodeURIComponent(v.slice(9)); S.view = 'progress'; render(); return; }
+  if (v === 'progress') S.exercise = '';
   if (v === 'tasks/new') { // quick action from the app icon
     S.view = 'tasks'; S.taskTab = 'today';
     history.replaceState(null, '', '#tasks');

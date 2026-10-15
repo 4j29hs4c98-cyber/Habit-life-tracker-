@@ -182,6 +182,39 @@ const DE = {
   'Uploading {name}…': '{name} wird hochgeladen…', 'Document added': 'Dokument hinzugefügt', "That doesn't look like a web address.": 'Das sieht nicht wie eine Internetadresse aus.',
   'Sign in to sync first to attach documents.': 'Melde dich zuerst an, um Dokumente anzuhängen.', 'Uploading documents needs an internet connection.': 'Zum Hochladen von Dokumenten brauchst du Internet.',
   'This file is larger than 20 MB.': 'Diese Datei ist größer als 20 MB.', 'Opening documents needs an internet connection.': 'Zum Öffnen von Dokumenten brauchst du Internet.',
+  // schedules, mini versions, free days, comparison, insights
+  'Schedule & target': 'Zeitplan & Ziel', 'How often': 'Wie oft', 'Every day': 'Jeden Tag', 'Specific days': 'Bestimmte Tage', '× per week': '× pro Woche',
+  'Times per week': 'Wie oft pro Woche', '{n}× per week': '{n}× pro Woche',
+  "Only the chosen days count. Other days don't lower your score.": 'Nur die gewählten Tage zählen. Andere Tage senken deine Quote nicht.',
+  'Check it off on any days. The week counts once you reach the number.': 'Hak sie an beliebigen Tagen ab. Die Woche zählt, sobald du die Zahl erreichst.',
+  'Target (optional)': 'Ziel (optional)', 'Unit': 'Einheit', 'Mini version (optional)': 'Mini-Version (optional)', 'Mini version': 'Mini-Version',
+  'For busy days: a mini version keeps your streak going and counts as half in your stats.': 'Für volle Tage: Die Mini-Version hält deine Serie am Laufen und zählt in der Statistik halb.',
+  'minutes': 'Minuten', 'pages': 'Seiten', 'times': 'Mal', 'glasses': 'Gläser', 'liters': 'Liter', 'steps': 'Schritte',
+  'MINI': 'MINI', 'Mini': 'Mini', 'mini': 'Mini', 'free day': 'freier Tag', 'wk': 'Wo.', '{n} of {of} this week': '{n} von {of} diese Woche',
+  '{n} week': '{n} Woche', '{n} weeks': '{n} Wochen', '{n} of {of} weeks reached · {c} check-ins': '{n} von {of} Wochen erreicht · {c}× abgehakt',
+  'same as {when}': 'wie im {when}', 'vs {when}': 'ggü. {when}',
+  'Insights': 'Erkenntnisse', 'Habits done by weekday, last 3 months': 'Erledigte Gewohnheiten nach Wochentag, letzte 3 Monate',
+  '{day} is your best day': '{day} ist dein bester Tag', '{p} of habits done, {day} is the weakest ({q}).': '{p} der Gewohnheiten erledigt, {day} ist am schwächsten ({q}).',
+  '"{name}" works best on {day}s': '„{name}“ klappt an {day}en am besten', 'Done on {a} of {b} {day}s in the last 3 months.': 'An {a} von {b} {day}en in den letzten 3 Monaten erledigt.',
+  '"{name}" slipped': '„{name}“ ist abgerutscht', '{c} this month, down from {p}.': '{c} in diesem Monat, vorher {p}.',
+  'A mini version for busy days might help.': 'Eine Mini-Version für volle Tage könnte helfen.', '"{name}" is improving': '„{name}“ wird besser',
+  '{c} this month, up from {p}.': '{c} in diesem Monat, vorher {p}.', 'No clear patterns yet. Keep going.': 'Noch keine klaren Muster. Bleib dran.',
+  'Insights appear after about two weeks of check-ins.': 'Erkenntnisse erscheinen nach etwa zwei Wochen Abhaken.',
+
+  // exercise progress
+  'Progress': 'Fortschritt', 'Progress chart': 'Fortschrittsdiagramm', 'Exercise progress': 'Übungsfortschritt', 'Back': 'Zurück',
+  '{n} session': '{n} Einheit', '{n} sessions': '{n} Einheiten', 'sessions': 'Einheiten', '{n} reps': '{n} Wdh.', 'since {date}': 'seit {date}',
+  'current weight': 'aktuelles Gewicht', 'current reps': 'aktuelle Wdh.', 'Last sessions': 'Letzte Einheiten', 'Best: {what} on {date}': 'Bestwert: {what} am {date}',
+  'Check off exercises in your training plan, and their progress shows up here.': 'Hak Übungen in deinem Trainingsplan ab, dann erscheint hier ihr Fortschritt.',
+  'No completed sessions yet.': 'Noch keine erledigten Einheiten.', 'The chart appears after your second session.': 'Das Diagramm erscheint nach deiner zweiten Einheit.',
+
+  // delete account
+  'Delete account': 'Konto löschen', 'Delete account…': 'Konto löschen…', 'Delete for good': 'Endgültig löschen', 'Confirmation': 'Bestätigung', 'DELETE': 'LÖSCHEN',
+  "Deletes your account and everything stored in the cloud: habits, tasks, workouts, documents and notification settings, on all devices. This can't be undone.":
+    'Löscht dein Konto und alles, was in der Cloud gespeichert ist: Gewohnheiten, Aufgaben, Trainings, Dokumente und Benachrichtigungs-Einstellungen, auf allen Geräten. Das lässt sich nicht rückgängig machen.',
+  'Tip: export a backup first. You can import it again later.': 'Tipp: Exportiere vorher ein Backup. Du kannst es später wieder importieren.',
+  'Everything in the cloud and on this device will be deleted. Type {word} to confirm.': 'Alles in der Cloud und auf diesem Gerät wird gelöscht. Gib zur Bestätigung {word} ein.',
+  'Type {word} to confirm.': 'Gib zur Bestätigung {word} ein.', 'Your account was deleted': 'Dein Konto wurde gelöscht',
 };
 
 let lang = 'en';

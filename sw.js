@@ -1,5 +1,5 @@
 // Offline support: cache the app files, serve them when there is no connection.
-const VERSION = 'v9';
+const VERSION = 'v10';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './sync.js', './push.js', './i18n.js', './pdf.js', './attach.js', './config.js', './manifest.webmanifest',
   './icon.svg', './icon-192.png', './icon-512.png'];
 
