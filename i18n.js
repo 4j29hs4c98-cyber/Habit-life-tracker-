@@ -215,6 +215,22 @@ const DE = {
   'Tip: export a backup first. You can import it again later.': 'Tipp: Exportiere vorher ein Backup. Du kannst es später wieder importieren.',
   'Everything in the cloud and on this device will be deleted. Type {word} to confirm.': 'Alles in der Cloud und auf diesem Gerät wird gelöscht. Gib zur Bestätigung {word} ein.',
   'Type {word} to confirm.': 'Gib zur Bestätigung {word} ein.', 'Your account was deleted': 'Dein Konto wurde gelöscht',
+  // week grid
+  'Week': 'Woche', 'Month': 'Monat', 'Grid view': 'Ansicht',
+  // perfect day
+  'Perfect day': 'Perfekter Tag', 'Every habit for today is done.': 'Alle Gewohnheiten für heute sind erledigt.',
+  // navigation
+  'Stats': 'Statistik', 'Year': 'Jahr', 'All reviews': 'Alle Rückblicke', 'New workout': 'Neues Training',
+  // undo
+  'Undo': 'Rückgängig', 'Restored': 'Wiederhergestellt', 'Project deleted': 'Projekt gelöscht', 'Weekly habit deleted': 'Wöchentliche Gewohnheit gelöscht',
+  'Goal deleted': 'Ziel gelöscht', '"{name}" deleted': '„{name}“ gelöscht',
+  // archive
+  'Archive': 'Archivieren', 'Restore': 'Wiederherstellen', 'archived': 'archiviert', 'Archived habits': 'Archivierte Gewohnheiten', '"{name}" archived': '„{name}“ archiviert',
+  '"{name}" restored': '„{name}“ wiederhergestellt', 'since {date}': 'seit {date}',
+  'Habits you archive show up here. Their history stays in your stats.': 'Archivierte Gewohnheiten erscheinen hier. Ihr Verlauf bleibt in deiner Statistik.',
+  "Archived on {date}. It doesn't show on Today or in the grids, but its history stays in your stats.": 'Archiviert am {date}. Sie erscheint nicht mehr bei „Heute“ und in den Rastern, aber ihr Verlauf bleibt in deiner Statistik.',
+  // training on Today
+  '{done} of {total} done': '{done} von {total} erledigt', 'min': 'Min.',
 };
 
 let lang = 'en';

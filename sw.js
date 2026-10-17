@@ -1,6 +1,6 @@
 // Offline support: cache the app files, serve them when there is no connection.
-const VERSION = 'v10';
-const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './sync.js', './push.js', './i18n.js', './pdf.js', './attach.js', './config.js', './manifest.webmanifest',
+const VERSION = 'v11';
+const SHELL = ['./', './index.html', './styles.css', './app.js', './core.js', './render.js', './forms.js', './actions.js', './views/today.js', './views/habits.js', './views/tasks.js', './views/train.js', './views/stats.js', './views/settings.js', './db.js', './sync.js', './push.js', './i18n.js', './pdf.js', './attach.js', './config.js', './manifest.webmanifest',
   './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
