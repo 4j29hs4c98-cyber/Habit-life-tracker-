@@ -24,6 +24,7 @@ export function scheduleFields(h) {
       <label class="field only-weekly">${tr('Times per week')}<select name="perWeek">${[1, 2, 3, 4, 5, 6].map(n => `<option ${+(d.perWeek || 3) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       <p class="hintbox only-days">${tr('Only the chosen days count. Other days don\'t lower your score.')}</p>
       <p class="hintbox only-weekly">${tr('Check it off on any days. The week counts once you reach the number.')}</p>
+      <label class="field">${tr('Time (optional)')}<input name="time" type="time" value="${esc(d.time || '')}"></label>
       <div class="two">
         <label class="field">${tr('Target (optional)')}<input name="target" type="number" inputmode="decimal" min="0" step="any" value="${esc(d.target || '')}" placeholder="15"></label>
         <label class="field">${tr('Unit')}<input name="unit" list="unit-list" value="${esc(d.unit ? tr(d.unit) : '')}" placeholder="${tr('minutes')}"></label>
@@ -59,7 +60,7 @@ export function taskForm(x, due) {
   openModal(`<form data-form="task" data-id="${x ? x.id : ''}">
     <h2>${tr(x ? 'Edit task' : 'New task')}</h2>
     <label>${tr("Task")}<input name="title" required value="${esc(x?.data.title || '')}"></label>
-    <label>${tr("Due date")}<input type="date" name="due" value="${esc(x?.data.due ?? due ?? '')}"></label>
+    <div class="two"><label>${tr("Due date")}<input type="date" name="due" value="${esc(x?.data.due ?? due ?? '')}"></label><label>${tr('Time (optional)')}<input type="time" name="time" value="${esc(x?.data.time || '')}"></label></div>
     <label>${tr("Project")}<select name="projectId">${projectOptions(x?.data.projectId)}</select></label>
     <label>${tr("Notes")}<textarea name="notes" rows="3">${esc(x?.data.notes || '')}</textarea></label>
     ${attSection()}

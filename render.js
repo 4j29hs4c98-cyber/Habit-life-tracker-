@@ -9,6 +9,7 @@ import { viewMonth, viewProgress, viewReviews, viewYear } from './views/stats.js
 import { viewTasks } from './views/tasks.js';
 import { viewToday } from './views/today.js';
 import { viewPlan, viewTrain } from './views/train.js';
+import { viewJournal } from './views/journal.js';
 
 /* ---------- render ---------- */
 // Scrollable areas get a stable key (their section heading + class + position), so a re-render can put
@@ -43,7 +44,7 @@ export function render() {
   const main = $('#main');
   const keepScroll = render.lastView === S.view;
   const scroll = window.scrollY;
-  const views = { today: viewToday, habits: viewHabits, tasks: viewTasks, train: viewTrain, more: viewMore, plan: viewPlan, year: () => statsWrap('year', viewYear()), month: () => statsWrap('month', viewMonth()), progress: () => statsWrap('progress', viewProgress()), reviews: () => statsWrap('reviews', viewReviews()) };
+  const views = { today: viewToday, habits: viewHabits, tasks: viewTasks, train: viewTrain, more: viewMore, plan: viewPlan, journal: viewJournal, year: () => statsWrap('year', viewYear()), month: () => statsWrap('month', viewMonth()), progress: () => statsWrap('progress', viewProgress()), reviews: () => statsWrap('reviews', viewReviews()) };
   const saved = new Map(), focus = keepScroll ? focusSignature(document.activeElement) : null;
   if (keepScroll) scrollAreas().forEach((el, k) => saved.set(k, [el.scrollLeft, el.scrollTop]));
   main.style.minHeight = keepScroll ? `${main.offsetHeight}px` : ''; // no collapse while swapping content, so the page can't jump
@@ -52,7 +53,7 @@ export function render() {
     scrollAreas().forEach((el, k) => { const v = saved.get(k); if (v) { el.scrollLeft = v[0]; el.scrollTop = v[1]; } });
     if (keepScroll && Math.abs(window.scrollY - scroll) > 1) window.scrollTo(0, scroll);
   };
-  const navView = { plan: 'train', year: 'stats', month: 'stats', progress: 'stats', reviews: 'stats' }[S.view] || S.view;
+  const navView = { journal: 'today', plan: 'train', year: 'stats', month: 'stats', progress: 'stats', reviews: 'stats' }[S.view] || S.view;
   placeGear();
   updateFab();
   document.querySelectorAll('[data-nav]').forEach(a => a.setAttribute('aria-current', a.dataset.nav === navView ? 'page' : 'false'));

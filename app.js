@@ -3,10 +3,13 @@ import * as db from './db.js';
 import * as sync from './sync.js';
 import { tr } from './i18n.js';
 import { actions, forms } from './actions.js';
-import { $, S, VIEWS, closeModal, list, migrateWeekly, mondayOf, toast, today } from './core.js';
+import { $, S, VIEWS, closeModal, list, migrateWeekly, mondayOf, toast, today, get, save } from './core.js';
 import { attUpload, editWorkout, passwordForm } from './forms.js';
 import { applyLang, applyTheme, closeFab, initRenderWiring, render, softRender } from './render.js';
 import { notifySettings, refreshPush, saveNotify, syncLine } from './views/settings.js';
+import * as jc from './crypto.js';
+import { J } from './views/journal.js';
+import { pickHeroImage, setHeroReady } from './heroimg.js';
 
 /* ---------- events ---------- */
 document.addEventListener('click', async e => {
@@ -26,7 +29,7 @@ document.addEventListener('submit', async e => {
   const fn = forms[f.dataset.form];
   if (!fn) return;
   let res;
-  try { res = await fn(new FormData(f), f.dataset.id); }
+  try { res = await fn(new FormData(f), f.dataset.id, f); }
   catch (err) { toast(err.message || 'Something went wrong. Try again.'); return; }
   if (res !== 'keep' && $('#modal').open) closeModal();
   render();
@@ -35,6 +38,8 @@ document.addEventListener('submit', async e => {
 document.addEventListener('change', async e => {
   const el = e.target;
   if (el.id === 'import-file' && el.files[0]) return importFile(el.files[0]);
+  if (el.id === 'hero-file' && el.files[0]) { try { await pickHeroImage(el.files[0]); toast('Header image saved'); } catch (e) { toast(e.message); } el.value = ''; render(); return; }
+  if (el.id === 'pref-name') { await save('setting', 'setting_prefs', { ...(get('setting_prefs')?.data || {}), name: el.value.trim() }); return; }
   if (el.name === 'freq') { el.closest('.sched-body').dataset.freq = el.value; return; }
   if (el.id === 'att-file' && el.files.length) { const files = [...el.files]; el.value = ''; return attUpload(files); }
   if (el.dataset.notif) {
@@ -44,13 +49,19 @@ document.addEventListener('change', async e => {
   }
   const d = el.dataset.w;
   if (!d) return;
+  if (el.dataset.k === 'time' && !el.dataset.list) { await editWorkout(d, x => { x.time = el.value; }); return; }
   if (el.dataset.k === 'groups') {
     await editWorkout(d, x => { x.groups = el.value.split(',').map(s => s.trim()).filter(Boolean); });
     return;
   }
   const { list: l, i, k } = el.dataset;
-  await editWorkout(d, x => { if (x[l][+i]) x[l][+i][k] = el.type === 'checkbox' ? el.checked : el.value; });
-  if (el.type === 'checkbox') render();
+  await editWorkout(d, x => {
+    const e = x[l][+i]; if (!e) return;
+    e[k] = el.type === 'checkbox' ? el.checked : el.value;
+    if (k === 'done' && l === 'exercises') e.setsDone = el.checked ? (parseInt(e.sets, 10) || 1) : 0;
+    if (k === 'sets' && e.setsDone != null) { e.setsDone = Math.min(+e.setsDone || 0, Math.max(1, parseInt(e.sets, 10) || 1)); e.done = e.setsDone >= Math.max(1, parseInt(e.sets, 10) || 1); }
+  });
+  if (el.type === 'checkbox' || ['group', 'sets', 'name'].includes(el.dataset.k)) render();
 });
 
 async function importFile(file) {
@@ -86,6 +97,15 @@ function route() {
 }
 
 window.addEventListener('hashchange', route);
+// Swipe left/right on a week strip (or the week grid) to change the week.
+let swipe = null;
+document.addEventListener('touchstart', e => { const el = e.target.closest('[data-swipe]'); swipe = el && e.touches.length === 1 ? { el, x: e.touches[0].clientX, y: e.touches[0].clientY } : null; }, { passive: true });
+document.addEventListener('touchend', e => {
+  if (!swipe) return;
+  const dx = e.changedTouches[0].clientX - swipe.x, dy = e.changedTouches[0].clientY - swipe.y, act = actions[swipe.el.dataset.swipe];
+  swipe = null;
+  if (act && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) act({ dir: dx < 0 ? 1 : -1 });
+}, { passive: true });
 if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', e => {
   if (e.data?.type === 'open' && e.data.hash) location.hash = e.data.hash;
 });
@@ -141,8 +161,15 @@ const syncHooks = {
 };
 
 /* ---------- start ---------- */
+document.addEventListener('input', e => { // keep what you type in the journal while switching questions or moods
+  if (e.target.id === 'j-text') { const d = e.target.dataset.d; (S.jDraft[d] ||= {}).text = e.target.value; }
+});
+document.addEventListener('journal-ready', () => softRender());
+
 (async function start() {
   applyTheme();
+  jc.initAutoLock(() => { J.cache.clear(); S.jDraft = {}; if (['journal', 'month', 'today'].includes(S.view)) softRender(); });
+  setHeroReady(() => { if (S.view === 'today') softRender(); });
   initRenderWiring();
   await db.open();
   (await db.loadAll()).forEach(r => S.recs.set(r.id, r));

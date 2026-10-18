@@ -5,13 +5,16 @@ import * as push from './push.js';
 import { reviewPdf } from './pdf.js';
 import * as att from './attach.js';
 import { tr, LOC } from './i18n.js';
-import { allHabits, celebrate, dayStats, $, BUILTIN_AREAS, S, STARTER, STARTER_WEEKLY, addDays, areaInfo, closeModal, esc, get, habits, isDone, isMini, list, logId, mondayOf, monthKey, openModal, remove, save, toast, today, uid, ymd } from './core.js';
+import { allHabits, celebrate, dayStats, $, BUILTIN_AREAS, S, STARTER, STARTER_WEEKLY, addDays, areaInfo, closeModal, esc, get, habits, isDone, isMini, list, logId, mondayOf, monthKey, openModal, remove, save, toast, today, uid, ymd, parse, saveMany } from './core.js';
 import { UNITS, areaForm, areasModal, editWorkout, finishAtt, habitForm, passwordForm, projectForm, refreshAtt, simpleForm, taskForm } from './forms.js';
 import { applyLang, applyTheme, closeFab, render } from './render.js';
 import { refreshPush, saveNotify } from './views/settings.js';
 import { monthPdfData, yearPdfData } from './views/stats.js';
-import { PLAN_ID, dayHasContent, hasPlan, planData, workoutFor } from './views/train.js';
+import { PLAN_ID, dayHasContent, hasPlan, planData, workoutFor, ringProgress, setsOf, setsDoneOf } from './views/train.js';
 import { shownWeek } from './views/habits.js';
+import * as jc from './crypto.js';
+import { JOURNAL_SETTINGS_ID, journalSettings, decryptAll, entryFor, entryId, questionIndex, QUESTIONS, MOODS, J } from './views/journal.js';
+import { setHeroOn, removeHeroImage } from './heroimg.js';
 
 /* ---------- actions ---------- */
 export const nextOrder = kind => Math.max(0, ...list(kind).map(r => r.data.order ?? 0)) + 1;
@@ -19,6 +22,11 @@ export const nextOrder = kind => Math.max(0, ...list(kind).map(r => r.data.order
 // Delete (or overwrite) right away, then offer "Undo" for 5 seconds.
 // ids: every record the step changes. Undo writes them back (records that didn't exist are removed again).
 // later(): work that can't be undone (deleting files), done only when the 5 seconds are over.
+function workoutCheer(d, before) { // the ring just reached 100%
+  const after = ringProgress(workoutFor(d).w);
+  if (after.total && after.done >= after.total && before.done < before.total) celebrate('Workout complete', 'Every set is done. Great work!');
+}
+
 export async function undoable(msg, ids, work, later) {
   const before = [...new Set(ids)].map(id => { const r = S.recs.get(id); return { id, rec: r && !r.deleted ? structuredClone(r) : null }; });
   await work();
@@ -34,6 +42,9 @@ export async function undoable(msg, ids, work, later) {
     onTimeout: later,
   });
 }
+
+async function saveJournalPref(on) { await save('setting', 'setting_prefs', { ...(get('setting_prefs')?.data || {}), journal: on }); render(); }
+const two = (fd) => { const p1 = fd.get('p1'), p2 = fd.get('p2'); if (p1 !== p2) throw new Error('The two passphrases are not the same.'); if ((p1 || '').length < jc.MIN_PASSPHRASE) throw new Error(tr('Please use at least {n} characters.', { n: jc.MIN_PASSPHRASE })); return p1; };
 
 export const actions = {
   // mode "full": tap on Today · "mini": the Mini button · "cycle": grid cell (empty → done → mini → empty)
@@ -82,6 +93,10 @@ export const actions = {
   },
   month({ dir }) { S.month = new Date(S.month.getFullYear(), S.month.getMonth() + +dir, 1); S.gridWeek = null; render(); },
   'grid-mode'({ v }) { S.gridMode = v; render(); },
+  'plan-day'({ d }) { S.planDay = d === today() ? null : d; render(); },
+  'plan-week'({ dir }) { const d = ymd(addDays(parse(S.planDay || today()), 7 * +dir)); S.planDay = d === today() ? null : d; render(); },
+  'plan-day-go'({ d }) { S.planDay = d === today() ? null : d; location.hash = '#today'; },
+  'open-train-day'({ d }) { S.trainDay = d; S.week = mondayOf(parse(d)); location.hash = '#train'; },
   fab(_, el) {
     const m = $('#fab-menu'), open = m.hidden;
     if (open) {
@@ -145,10 +160,58 @@ export const actions = {
     const inputs = document.querySelectorAll(`input[data-w="${w}"][data-list="${l}"][data-k="name"]`);
     inputs[inputs.length - 1]?.focus();
   },
-  async 'tick-ex'({ w, list: l, i }) { // tick an exercise from the Today page (starts today's entry from the plan if needed)
-    await editWorkout(w, x => { if (x[l][+i]) x[l][+i].done = !x[l][+i].done; });
-    render();
+  async 'tick-ex'({ w, list: l, i }) { // tick a whole exercise (Today page) or a cardio entry
+    const before = ringProgress(workoutFor(w).w);
+    await editWorkout(w, x => { const e = x[l][+i]; if (!e) return; e.done = !e.done; if (l === 'exercises') e.setsDone = e.done ? setsOf(e) : 0; });
+    render(); workoutCheer(w, before);
   },
+  async 'tick-set'({ w, i, s }) { // tap set k: fill up to k; tap the last filled set again to undo it
+    const before = ringProgress(workoutFor(w).w);
+    await editWorkout(w, x => { const e = x.exercises[+i]; if (!e) return; const cur = setsDoneOf(e), k = +s + 1; e.setsDone = cur === k ? k - 1 : k; e.done = e.setsDone >= setsOf(e); });
+    render(); workoutCheer(w, before);
+  },
+  'open-journal'({ d }) { S.journalDay = d && d !== today() ? d : null; location.hash = '#journal'; },
+  'journal-day'({ d }) { S.journalDay = d === today() ? null : d; render(); },
+  'journal-month'({ dir }) { const ref = S.journalMonth ? parse(S.journalMonth + '-01') : parse(S.journalDay || today()); S.journalMonth = monthKey(new Date(ref.getFullYear(), ref.getMonth() + +dir, 1)); render(); },
+  'journal-q-next'() { const d = S.journalDay || today(); const dr = (S.jDraft[d] ||= {}); dr.qid = questionIndex(d, ++S.jqOffset); dr.free = false; render(); },
+  'journal-free'({ v }) { const d = S.journalDay || today(); const dr = (S.jDraft[d] ||= {}); dr.free = v === '1'; if (!dr.free && dr.qid == null) dr.qid = questionIndex(d, S.jqOffset); render(); },
+  'journal-mood'({ v, d }) { const dr = (S.jDraft[d] ||= {}); dr.mood = dr.mood === +v ? 0 : +v; render(); },
+  'journal-recover'({ v }) { S.jRecover = v === '1'; render(); },
+  'journal-lock'() { jc.lock(); toast('Journal locked'); },
+  'journal-toggle'({ v }) { saveJournalPref(v === '1'); },
+  'copy-recovery'() { navigator.clipboard?.writeText(S.recoveryShow || '').then(() => toast('Copied'), () => toast('Select the key and copy it by hand.')); },
+  'recovery-done'() {
+    if (!$('#rk-ok')?.checked) { toast('Please confirm that you have written down the key.'); return; }
+    S.recoveryShow = null; render();
+  },
+  'journal-change'() {
+    openModal(`<form data-form="journal-change">
+      <h2>${tr('Change journal passphrase')}</h2>
+      <p class="note">${tr('All entries are encrypted again with a new key. You will get a new recovery key; the old one stops working.')}</p>
+      <label>${tr('Current passphrase')}<input name="cur" type="password" autocomplete="current-password" required></label>
+      <label>${tr('New passphrase')}<input name="p1" type="password" autocomplete="new-password" minlength="${jc.MIN_PASSPHRASE}" required></label>
+      <label>${tr('Repeat passphrase')}<input name="p2" type="password" autocomplete="new-password" minlength="${jc.MIN_PASSPHRASE}" required></label>
+      <div class="row end"><button type="button" class="btn" data-action="close">${tr('Cancel')}</button><button class="btn primary">${tr('Change passphrase')}</button></div></form>`);
+  },
+  'journal-export-text'() {
+    if (!jc.isUnlocked()) { toast('Unlock your journal first.'); return; }
+    openModal(`<div class="stack"><h2>${tr('Export journal as text')}</h2>
+      <p class="warn-plain">${tr('This file is NOT encrypted. Anyone who opens it can read your entries. Keep it somewhere private and delete it when you no longer need it.')}</p>
+      <div class="row end"><button class="btn" data-action="close">${tr('Cancel')}</button><button class="btn primary" data-action="journal-export-go">${tr('Export anyway')}</button></div></div>`);
+  },
+  async 'journal-export-go'() {
+    await decryptAll();
+    const days = list('journal').map(r => r.id.slice(8)).sort();
+    const lines = days.map(d => { const e = entryFor(d); if (!e) return ''; return `${parse(d).toLocaleDateString(LOC(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}${e.mood ? '  ' + MOODS[e.mood - 1] : ''}\n${e.qid != null ? tr(QUESTIONS[e.qid]) + '\n' : ''}${e.text || ''}\n`; }).filter(Boolean);
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const a2 = document.createElement('a'); a2.href = URL.createObjectURL(blob); a2.download = `journal-${today()}.txt`; a2.click();
+    setTimeout(() => URL.revokeObjectURL(a2.href), 2000);
+    closeModal(); toast('Journal exported');
+  },
+  async 'hero-toggle'({ v }) { await setHeroOn(v === '1'); render(); },
+  async 'hero-remove'() { await removeHeroImage(); render(); toast('Header image removed'); },
+  'train-day'({ d }) { S.trainDay = d === today() ? null : d; render(); },
+  'train-week'({ dir }) { const d = ymd(addDays(parse(S.trainDay || today()), 7 * +dir)); S.trainDay = d === today() ? null : d; S.week = mondayOf(parse(d)); render(); },
   async 'del-row'({ w, list: l, i }) { await editWorkout(w, x => x[l].splice(+i, 1)); render(); },
   async 'copy-week'() {
     const prev = addDays(S.week, -7);
@@ -308,6 +371,46 @@ export const actions = {
 };
 
 export const forms = {
+  async 'journal-setup'(fd) {
+    const p = two(fd);
+    const { settings, recoveryKey } = await jc.setup(p);
+    await save('setting', JOURNAL_SETTINGS_ID, settings);
+    S.recoveryShow = recoveryKey;
+  },
+  async 'journal-unlock'(fd) {
+    try { await jc.unlock(fd.get('p'), journalSettings()); }
+    catch { throw new Error('Wrong passphrase. Please try again.'); }
+    await decryptAll();
+  },
+  async 'journal-recover'(fd) {
+    const p = two(fd);
+    let next;
+    try { next = await jc.recover(fd.get('rk'), p, journalSettings()); }
+    catch (e) { throw new Error(e.message === 'wrong-recovery-key' ? 'That recovery key does not match.' : e.message); }
+    await save('setting', JOURNAL_SETTINGS_ID, next);
+    S.jRecover = false;
+    await decryptAll();
+    toast('New passphrase saved');
+  },
+  async 'journal-change'(fd) {
+    const p = two(fd);
+    let res;
+    try { res = await jc.rekey(fd.get('cur'), p, journalSettings(), list('journal').map(r => ({ id: r.id, box: r.data }))); }
+    catch (e) { throw new Error(e.message === 'wrong-passphrase' ? 'Wrong passphrase. Please try again.' : e.message); }
+    await saveMany([{ kind: 'setting', id: JOURNAL_SETTINGS_ID, data: res.settings }, ...res.boxes.map(b => ({ kind: 'journal', id: b.id, data: b.box }))]);
+    J.cache.clear(); await decryptAll();
+    S.recoveryShow = res.recoveryKey;
+    location.hash = '#journal';
+  },
+  async 'journal-entry'(fd, _id, f) {
+    const d = f.dataset.d, qid = fd.get('qid'), mood = +fd.get('mood') || 0, text = (fd.get('text') || '').trim();
+    if (!text && !mood) throw new Error('Write a few words or pick a mood first.');
+    const entry = { date: d, text, qid: qid === '' ? null : +qid, mood: mood || null, updated: new Date().toISOString() };
+    await save('journal', entryId(d), await jc.encryptJSON(entry));
+    await decryptAll();
+    delete S.jDraft[d];
+    toast('Entry saved');
+  },
   async area(fd, id) {
     const name = fd.get('name').trim(), icon = (fd.get('icon') || '').trim() || '🏷️';
     let areaId = id;
@@ -328,7 +431,7 @@ export const forms = {
     const unit = UNITS.find(u => tr(u).toLowerCase() === unitIn.toLowerCase() || u === unitIn.toLowerCase()) || unitIn;
     const num = v => { const n = parseFloat(String(v || '').replace(',', '.')); return n > 0 ? n : ''; };
     await save('habit', id || uid(), { ...(old?.data || { order: nextOrder('habit'), start: today() }), name: fd.get('name').trim(), area: fd.get('area'),
-      freq, days: freq === 'days' ? days : [], perWeek: freq === 'weekly' ? +fd.get('perWeek') || 3 : '', target: num(fd.get('target')), unit: num(fd.get('target')) || num(fd.get('mini')) ? unit : '', mini: num(fd.get('mini')) });
+      time: fd.get('time') || '', freq, days: freq === 'days' ? days : [], perWeek: freq === 'weekly' ? +fd.get('perWeek') || 3 : '', target: num(fd.get('target')), unit: num(fd.get('target')) || num(fd.get('mini')) ? unit : '', mini: num(fd.get('mini')) });
   },
   async weekly(fd, id) {
     const old = id ? get(id) : null;
@@ -340,7 +443,7 @@ export const forms = {
   async task(fd, id) {
     const rid = id || S.att?.ownerId || uid(), old = get(rid);
     const attachments = finishAtt() ?? old?.data.attachments ?? [];
-    await save('task', rid, { ...(old?.data || { done: false }), title: fd.get('title').trim(), due: fd.get('due') || '', projectId: fd.get('projectId') || '', notes: fd.get('notes') || '', attachments });
+    await save('task', rid, { ...(old?.data || { done: false }), title: fd.get('title').trim(), due: fd.get('due') || '', time: fd.get('time') || '', projectId: fd.get('projectId') || '', notes: fd.get('notes') || '', attachments });
   },
   async project(fd, id) {
     const rid = id || S.att?.ownerId || uid(), old = get(rid);

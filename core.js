@@ -25,7 +25,7 @@ export const EXERCISES = ['Barbell bench press', 'Incline bench press', 'Push-up
   'Pull-ups', 'Seated row', 'Lat pulldown', 'Bicep curl', 'Squat', 'Deadlift', 'Leg press',
   'Lunges', 'Shoulder press', 'Lateral raise', 'Plank'];
 export const CARDIO = ['Treadmill', 'Jogging', 'Cycling', 'Rowing', 'Swimming', 'Jump rope'];
-export const VIEWS = ['today', 'habits', 'tasks', 'train', 'more', 'plan', 'year', 'month', 'progress', 'reviews', 'stats'];
+export const VIEWS = ['today', 'habits', 'tasks', 'train', 'more', 'plan', 'year', 'month', 'progress', 'reviews', 'stats', 'journal'];
 
 /* ---------- helpers ---------- */
 export const $ = (s, el = document) => el.querySelector(s);
@@ -54,6 +54,9 @@ export const S = {
   installPrompt: null,
   push: { perm: 'default', sub: false, busy: false },
   statsTab: 'month',
+  planDay: null,
+  journalDay: null, journalMonth: null, jqOffset: 0, jFree: false, jDraft: {}, jRecover: false, recoveryShow: null,  // day shown in Today's plan (null = today)
+  trainDay: null, // day shown on the Training page (null = today)
   gridMode: null, // 'week' | 'month' | null = automatic (week on phones, month on larger screens)
   gridWeek: null, // Monday shown in the week grid
 };
@@ -70,6 +73,15 @@ export async function save(kind, id, data) {
   sync.schedule();
   return rec;
 }
+// Save several records at once (one local write and one sync), e.g. when re-encrypting the journal.
+export async function saveMany(items) {
+  const now = new Date().toISOString();
+  const recs = items.map(({ kind, id, data }) => ({ id, kind, data, updated_at: now, deleted: false, synced: false }));
+  recs.forEach(r => S.recs.set(r.id, r));
+  await db.putMany(recs);
+  sync.schedule();
+}
+
 export async function remove(id) {
   const r = S.recs.get(id);
   if (!r) return;
@@ -302,7 +314,7 @@ export function toast(msg, opt = {}) {
 // Put the toast back on the page when a dialog closes.
 export function resetToastHost() { const t = $('#toast'); if (t && t.parentElement !== document.body) document.body.appendChild(t); }
 // "Perfect day": shown once when the last habit of today is checked off.
-export function celebrate() {
+export function celebrate(title = 'Perfect day', sub = 'Every habit for today is done.') {
   const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
   document.getElementById('celebrate')?.remove();
   const el = document.createElement('div');
@@ -313,7 +325,7 @@ export function celebrate() {
     const a = (i / 14) * Math.PI * 2 + Math.random() * 0.3, r = 110 + Math.random() * 50;
     return `<i style="--x:${Math.round(Math.cos(a) * r)}px;--y:${Math.round(Math.sin(a) * r)}px;--r:${Math.round(Math.random() * 180 - 90)}deg"></i>`;
   }).join('');
-  el.innerHTML = `<div class="cel-card"><svg class="cel-ring" viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52"/><path d="M39 62l14 14 29-31"/></svg><strong>${tr('Perfect day')}</strong><span>${tr('Every habit for today is done.')}</span></div>${bits}`;
+  el.innerHTML = `<div class="cel-card"><svg class="cel-ring" viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="52"/><path d="M39 62l14 14 29-31"/></svg><strong>${tr(title)}</strong><span>${tr(sub)}</span></div>${bits}`;
   document.body.appendChild(el);
   const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 350); };
   el.addEventListener('click', close);
